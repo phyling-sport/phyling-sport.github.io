@@ -1,0 +1,3079 @@
+openapi: 3.1.1
+info:
+  title: Phyling API
+  description: API for Phyling application (can be used on app.phyling.fr or on a Maxi-Hub).
+  version: 7.0.6
+
+tags:
+  - name: OAuth
+    description: OAuth routes
+  - name: Webhooks
+    description: Webhook subscription routes, for a third-party OAuth application
+  - name: Clients
+    description: Clients routes
+  - name: Users
+    description: Users routes
+  - name: Devices
+    description: Devices routes
+  - name: DevicesRT
+    description: Devices realtime routes
+  - name: Records
+    description: Records routes
+  - name: Utils
+    description: Utils routes
+
+servers:
+  - url: https://api.app.phyling.fr
+    description: Phyling cloud server
+  - url: https://api.staging.cl.phyling.fr
+    description: Phyling staging server
+  - url: http://192.168.1.42:5001
+    description: Maxi-Hub local server
+
+paths:
+  /login:
+    get:
+      tags:
+        - Users
+      summary: Get information about connected user
+      responses:
+        "200":
+          description: User data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        "401":
+          $ref: '#/components/responses/401'
+  /refresh:
+    post:
+      tags:
+        - Users
+      summary: Refresh the access token
+      description: >
+        Exchange the refresh token carried by `Authorization: Bearer <refresh_token>` for a new
+        access token. The refresh token is rotated at every use: the returned `refresh_token`
+        replaces the presented one. Replaying the previous refresh token within the grace window
+        returns the very same pair; presenting it later revokes the whole session.
+      responses:
+        "200":
+          description: New access and refresh tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                  refresh_token:
+                    type: string
+                    example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                  token_type:
+                    type: string
+                    example: "Bearer"
+                  expires_in:
+                    type: integer
+                    description: Access token lifetime, in seconds
+                    example: 10800
+        "401":
+          $ref: '#/components/responses/401'
+  /logout:
+    post:
+      tags:
+        - Users
+      summary: Log out the session of the presented token
+      description: >
+        Revoke **only** the session the presented access token belongs to: nothing else of the
+        user is touched, neither their other devices nor the sessions they granted to other
+        applications, and the user is not logged out of Phyling. Idempotent, and works both for
+        a front login session and for a session opened by an OAuth2 application. An API key
+        carries no session and always answers `{"revoked": false}`.
+
+        To revoke every session of one user on **your** application at once, use
+        `POST /oauth/logout`, which is scoped to that (user, application) pair.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked:
+                    type: boolean
+                    description: True when a live session was revoked by this call
+                    example: true
+        "401":
+          $ref: '#/components/responses/401'
+  /oauth/authorize:
+    get:
+      tags:
+        - OAuth
+      summary: OAuth authorization endpoint
+      description: If the user is logged in issue a code and redirect, else show login HTML
+      parameters:
+        - in: query
+          name: client_id
+          schema:
+            type: string
+          required: true
+          description: OAuth app client ID
+        - in: query
+          name: redirect_uri
+          schema:
+            type: string
+          required: true
+          description: Redirect URI after authorization
+        - in: query
+          name: state
+          schema:
+            type: string
+          required: false
+          description: Optional state parameter for security
+      responses:
+        "200":
+          description: OAuth authorization page
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: App disabled or redirect URI not allowed
+  /oauth/code:
+    post:
+      tags:
+        - OAuth
+      summary: Create OAuth authorization code
+      description: Create an authorization code for the authenticated Phyling user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                client_id:
+                  type: string
+                  example: "app_123"
+                redirect_uri:
+                  type: string
+                  example: "https://example.com/callback"
+                state:
+                  type: string
+                  example: "random_state_string"
+              required:
+                - client_id
+                - redirect_uri
+      responses:
+        "200":
+          description: Authorization code created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    example: "abc123def456"
+                  redirect_uri:
+                    type: string
+                    example: "https://example.com/callback"
+                  state:
+                    type: string
+                    example: "random_state_string"
+                  expires_at:
+                    type: string
+                    example: "2023-12-04T10:30:00Z"
+                  redirect_next:
+                    type: string
+                    example: "https://example.com/callback?code=abc123def456&state=random_state_string"
+        "400":
+          description: App disabled or redirect URI not allowed
+        "401":
+          $ref: '#/components/responses/401'
+  /oauth/token:
+    post:
+      tags:
+        - OAuth
+      summary: Exchange authorization code or refresh token for access/refresh JWTs
+      description: >
+        Exchange an authorization code or refresh token for access/refresh JWTs.
+        The body may be sent as JSON or as application/x-www-form-urlencoded, and the client
+        credentials may be sent either in the body (client_secret_post) or in an
+        `Authorization: Basic base64(client_id:client_secret)` header (client_secret_basic).
+        When both channels carry a client_id, they must match. `redirect_uri` is mandatory for
+        the authorization_code grant and ignored for the refresh_token grant.
+        Each successful exchange rotates the refresh token: the previous one must be dropped.
+      security:
+        - basicAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthTokenRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OAuthTokenRequest'
+      responses:
+        "200":
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                  refresh_token:
+                    type: string
+                    example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                  token_type:
+                    type: string
+                    example: "Bearer"
+                  expires_in:
+                    type: integer
+                    description: Access token lifetime in seconds
+                    example: 10800
+                  user:
+                    $ref: '#/components/schemas/User'
+        "400":
+          $ref: '#/components/responses/OAuthError'
+        "401":
+          $ref: '#/components/responses/OAuthError'
+  /oauth/userinfo:
+    get:
+      tags:
+        - OAuth
+      summary: Get the identity of the user behind an OAuth2 access token
+      description: >
+        Return the identity of the user who authorized the calling application. Requires an
+        OAuth2 access token (`Authorization: Bearer <access_token>`); an API key or a token
+        issued by the Phyling web login is refused. The payload stays minimal: everything else
+        is read from the regular API routes with the same token.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthUserInfo'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          description: The token is not an OAuth2 access token
+    post:
+      tags:
+        - OAuth
+      summary: Get the identity of the user behind an OAuth2 access token
+      description: Same as the GET form, for clients that post to the userinfo endpoint.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthUserInfo'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          description: The token is not an OAuth2 access token
+  /oauth/revoke:
+    post:
+      tags:
+        - OAuth
+      summary: Revoke an access or refresh token (RFC 7009)
+      description: >
+        Revoke the session behind the given token: no further access token can be obtained
+        from it. Access tokens already issued stay valid until they expire.
+        Authenticated by the application credentials, in the body or in an
+        `Authorization: Basic` header. Always answers 200, even for an unknown, expired or
+        already revoked token.
+      security:
+        - basicAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OAuthRevokeRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthRevokeRequest'
+      responses:
+        "200":
+          description: Token revoked, or unknown to this application
+        "400":
+          $ref: '#/components/responses/OAuthError'
+        "401":
+          $ref: '#/components/responses/OAuthError'
+  /oauth/logout:
+    post:
+      tags:
+        - OAuth
+      summary: Disconnect the current user from the calling application
+      description: >
+        Revoke every session the current user holds on the calling application, on all their
+        devices. Scoped to that user only: the application keeps serving its other users.
+        Requires an OAuth2 access token (`Authorization: Bearer <access_token>`).
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked_sessions:
+                    type: integer
+                    example: 2
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          description: The token is not an OAuth2 access token
+  /webhooks/subscriptions:
+    post:
+      tags:
+        - Webhooks
+      summary: Declare a new webhook subscription
+      description: >
+        Create a subscription for the calling OAuth application: one URL, one list of event
+        types among `record.created`, `record.updated`, `record.deleted`, `user.created`,
+        `user.updated`, `user.deleted`, and one signing secret shown only this once.
+        Authenticated with the application credentials, in the body or in an
+        `Authorization: Basic` header, exactly like `/oauth/token`. `payload_format` must be one
+        of the formats the managing client of the application allows.
+        The url must use HTTPS and resolve to a public address: private, loopback and
+        link-local targets are refused, including their encoded forms.
+      security:
+        - basicAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookSubscriptionCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebhookSubscriptionCreateRequest'
+      responses:
+        "200":
+          description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscriptionWithSecret'
+        "400":
+          description: Invalid url, event_types or payload_format, or subscription quota reached
+        "401":
+          $ref: '#/components/responses/OAuthError'
+        "403":
+          description: This application is disabled, not allowed to use webhooks, or not this payload format
+    get:
+      tags:
+        - Webhooks
+      summary: List the subscriptions of the calling application
+      description: >
+        Never carries any secret. Credentials go in an `Authorization: Basic` header: this method carries no
+        body, and the credentials are never read from the query string.
+      security:
+        - basicAuth: []
+      responses:
+        "200":
+          description: Subscriptions of the calling application
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookSubscription'
+        "401":
+          $ref: '#/components/responses/OAuthError'
+        "403":
+          description: This application is disabled
+  /webhooks/subscriptions/{subscription_id}:
+    get:
+      tags:
+        - Webhooks
+      summary: Read one subscription of the calling application
+      description: >
+        Credentials go in an `Authorization: Basic` header: this method carries no
+        body, and the credentials are never read from the query string.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/subscription_id'
+      responses:
+        "200":
+          description: Subscription data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscription'
+        "401":
+          $ref: '#/components/responses/OAuthError'
+        "403":
+          description: This application is disabled
+        "404":
+          description: Subscription not found, or belongs to another application
+    put:
+      tags:
+        - Webhooks
+      summary: Update a subscription
+      description: >
+        Every field is optional: send only what changes. Setting `active` to false pauses the
+        deliveries without deleting the subscription.
+      security:
+        - basicAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/subscription_id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookSubscriptionUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebhookSubscriptionUpdateRequest'
+      responses:
+        "200":
+          description: Subscription updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscription'
+        "400":
+          description: Invalid url, event_types or payload_format
+        "401":
+          $ref: '#/components/responses/OAuthError'
+        "403":
+          description: This application is disabled, or this payload format is not allowed for it
+        "404":
+          description: Subscription not found, or belongs to another application
+    delete:
+      tags:
+        - Webhooks
+      summary: Delete a subscription
+      description: >
+        Also deletes every delivery still queued for it.
+        Credentials go in an `Authorization: Basic` header: this method carries no
+        body, and the credentials are never read from the query string.
+      security:
+        - basicAuth: []
+      parameters:
+        - $ref: '#/components/parameters/subscription_id'
+      responses:
+        "200":
+          description: Subscription deleted
+        "401":
+          $ref: '#/components/responses/OAuthError'
+        "403":
+          description: This application is disabled
+        "404":
+          description: Subscription not found, or belongs to another application
+  /webhooks/subscriptions/{subscription_id}/rotate_secret:
+    post:
+      tags:
+        - Webhooks
+      summary: Rotate the signing secret of a subscription
+      description: >
+        Issue a new signing secret, shown only this once. The previous secret keeps signing
+        deliveries alongside the new one for grace_seconds (24 h by default): during that
+        window every delivery carries two `v1` signatures in `X-Phyling-Signature`, and only one
+        of them has to validate, so the verifier can be redeployed without missing a delivery.
+      security:
+        - basicAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/subscription_id'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grace_seconds:
+                  type: integer
+                  description: How long the previous secret stays valid, at most 24 h (86400 s)
+                  example: 86400
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                grace_seconds:
+                  type: integer
+                  example: 86400
+      responses:
+        "200":
+          description: Secret rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscriptionWithSecret'
+        "400":
+          description: grace_seconds must be an integer between 0 and 86400
+        "401":
+          $ref: '#/components/responses/OAuthError'
+        "403":
+          description: This application is disabled
+        "404":
+          description: Subscription not found, or belongs to another application
+  /users/all:
+    post:
+      tags:
+        - Users
+      summary: Get info about all users
+      description: Get info about all users in the scope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                client_id:
+                  type: integer
+                  example: 1
+                  description: Select one client (only for admin)
+                group_ids:
+                  type: array
+                  example: []
+                role:
+                  type: string
+                  example: Athlete
+                  description: Should be `Admin`, `Manager`, `Coach` or `Athlete`
+                active:
+                  type: boolean
+                  example: true
+                  description: Select only active users
+                search:
+                  type: string
+                  example: ""
+                pageId:
+                  type: integer
+                  example: 1
+                pageSize:
+                  type: integer
+                  example: 50
+                  description: >
+                    Page size. A full-detail listing (`soft` false) is always paginated and
+                    capped at 200 per page: `pageSize` <= 0 or above 200 is clamped to 200.
+                    `total` stays exact, so compare it with the number of returned items to
+                    know whether more pages remain. Use `soft` true to list everything at once.
+                soft:
+                  type: boolean
+                  example: true
+                  description: Returns only minimal information on users, and lifts the page cap
+      responses:
+        "200":
+          description: The users list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 120
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                    example: []
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+  /devices/all:
+    post:
+      tags:
+        - Devices
+      summary: Get all devices
+      description: Available for admin only
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                search:
+                  type: string
+                  example: 200
+                  description: Search in device number, name or comment
+                clientId:
+                  type: integer
+                  example: 2
+                enabled:
+                  type: boolean
+                  example: true
+                type:
+                  type: array
+                  example: [10, 20]
+                sortBy:
+                  type: array
+                  description: List of sort entries applied in order
+                  items:
+                    type: object
+                    required: [field, order]
+                    properties:
+                      field:
+                        type: string
+                        enum: [number, name, created_date, client, in_stock]
+                      order:
+                        type: string
+                        enum: [asc, desc]
+                  example: [{ field: number, order: asc }]
+                pageId:
+                  type: integer
+                  example: 1
+                pageSize:
+                  type: integer
+                  example: 10
+      responses:
+        "200":
+          description: The devices list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+                    example: []
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+  /devices/all/soft:
+    get:
+      tags:
+        - Devices
+      summary: Get all devices in "soft" version (not all datas)
+      description: Available for all connected users
+      parameters:
+        - in: query
+          name: clientId
+          schema:
+            type: integer
+            example: 2
+          required: false
+          description: Select for one client (only for admin)
+        - in: query
+          name: type
+          schema:
+            type: integer
+            example: 10
+          required: false
+          description: The device type (for example 10 for Maxi-Phyling)
+      responses:
+        "200":
+          description: The devices list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+                    example: []
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+
+  /devices/rt/{client_id}/all:
+    post:
+      tags:
+        - DevicesRT
+      summary: List all devices real-time data for a client
+      description: Returns all real-time data for devices connected to a client. Only available for admin or the client itself.
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+      responses:
+        "200":
+          description: All devices real-time data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  example: [{'name': 'Maxi 300', 'number': 10200300, 'is_connected': True, 'state': 'idle'}]
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+  /devices/rt/{client_id}/{device_number}/settings:
+    get:
+      tags:
+        - DevicesRT
+      summary: Get one device real-time settings
+      description: Get the real-time settings for a specific device. Only available for admin or the client itself.
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+        - in: path
+          name: device_number
+          schema:
+            type: integer
+          required: true
+          description: Numeric number of the device
+      responses:
+        "200":
+          description: Device real-time settings
+          content:
+            application/json:
+              schema:
+                type: object
+                example: {
+                  "number": 10200300,
+                  "name": "Maxi 300",
+                  "client": { "id": 2, "name": "phyling" },
+                  "group": { "id": 1, "name": "phyling" },
+                  "user": { "id": 10, "mail": "tim.nicolas@phyling.fr", "firstname": "Tim", "lastname": "Nicolas", "active": true },
+                  "sport": { "name": "default", "display_name": "D\u00e9faut" },
+                  "is_connected": true,
+                  "features": {
+                    "restart": { "cmd": "v1.board.restart" },
+                    "shutdown": { "cmd": "v1.board.shutdown" },
+                    "config": { "cmd_set": "v1.board.config.set", "cmd_get": "v1.board.config.get" },
+                    "wifi": { "cmd_set": "v1.board.wifi.set", "cmd_get": "v1.board.wifi.get" },
+                    "device_info": { "cmd_set": "v1.board.device_info.set", "cmd_get": "v1.board.device_info.get" },
+                    "calib": { "cmd_set": "v1.board.calib.set", "cmd_get": "v1.board.calib.get" },
+                    "time_set": { "cmd": "v1.board.time.set" },
+                    "record": { "cmd_start": "v1.record.rec.start", "cmd_stop": "v1.record.rec.stop", "cmd_realtime": "v1.record.realtime.set" }
+                  },
+                  "modules": {
+                    "gps": { "id": 1, "type": "gps", "is_connected": false },
+                    "imu": { "id": 2, "type": "imu", "is_connected": true }
+                  },
+                  "timezone": "Europe/Paris",
+                  "version": "v7.0.0",
+                  "needFirmwareUpdate": false,
+                  "mqtt_refresh_delay": 0,
+                  "disconnect_timeout": 30,
+                  "available_connectivity": ["wifi", "lte"],
+                  "network_infos": { "has_roaming": false },
+                  "battery": 100,
+                  "epoch": 1756289565.0,
+                  "state": "idle",
+                  "realtime_data_keys": null,
+                  "realtime_indicator_keys": null,
+                  "recTime": 0.0,
+                  "recTimeSinceEpoch": 0.0
+                }
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "418":
+          $ref: '#/components/responses/418'
+  /devices/rt/{client_id}/{device_number}/status:
+    get:
+      tags:
+        - DevicesRT
+      summary: Get one device real-time status
+      description: Get the real-time status for a specific device. Only available for admin or the client itself.
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+        - in: path
+          name: device_number
+          schema:
+            type: integer
+          required: true
+          description: Numeric number of the device
+      responses:
+        "200":
+          description: Device real-time status
+          content:
+            application/json:
+              schema:
+                type: object
+                example: {
+                  "number": 10200300,
+                  "is_connected": true,
+                  "battery": 100,
+                  "epoch": 1756289737.0,
+                  "state": "record",
+                  "modules": {
+                    "gps": { "is_connected": false, "realtime": false },
+                    "imu": { "is_connected": true, "realtime": true }
+                  },
+                  "realtime_data_keys": [
+                    {
+                      "name": "gps.latitude",
+                      "label": "gps.latitude",
+                      "description": "",
+                      "unit": "",
+                      "precision": 3,
+                      "yRange": []
+                    },
+                    {
+                      "name": "gps.speed",
+                      "label": "gps.speed",
+                      "description": "",
+                      "unit": "m/s",
+                      "precision": 3,
+                      "yRange": []
+                    },
+                    {
+                      "name": "imu.acc",
+                      "label": "imu.acc",
+                      "description": "",
+                      "unit": "m/s2",
+                      "precision": 3,
+                      "yRange": []
+                    }
+                  ],
+                  "realtime_indicator_keys": [
+                    {
+                      "unit": { "fr": "m/s2", "en": "m/s2" },
+                      "description": { "fr": "Acc", "en": "Acc" },
+                      "precision": 2,
+                      "enabled": true,
+                      "name": "imu",
+                      "type": "number"
+                    }
+                  ],
+                  "recTime": 10.010580062866211,
+                  "recTimeSinceEpoch": 1759392302.368264,
+                  "network_infos": { "has_roaming": false }
+                }
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "418":
+          $ref: '#/components/responses/418'
+  /devices/rt/{client_id}/{device_number}/realtime:
+    post:
+      tags:
+        - DevicesRT
+      summary: Set device real-time data
+      description: |
+        Set device real-time data for `realtime_expiration` seconds (120 by default). You need to call it periodically to keep the real-time data active.
+        You can enable by module or by real-time data keys.
+        Only available for admin or the client itself.
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+        - in: path
+          name: device_number
+          schema:
+            type: integer
+          required: true
+          description: Numeric number of the device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                modules:
+                  type: array
+                  items:
+                    type: string
+                  example: ["imu", "adc"]
+                  description: List of modules to set in real-time data
+                realtime_data_keys:
+                  type: array
+                  items:
+                    type: string
+                  example: ["imu.acc_x", "gps.speed"]
+                  description: List of real-time data keys to set
+                realtime_expiration:
+                  type: integer
+                  minimum: 1
+                  default: 120
+                  example: 120
+                  description: Seconds before the real-time subscription expires. Call the route again before it expires to keep the real-time data active.
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: '#/components/responses/400'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "418":
+          $ref: '#/components/responses/418'
+        "500":
+          $ref: '#/components/responses/500'
+        "503":
+          $ref: '#/components/responses/503'
+  /devices/rt/{client_id}/{device_number}/rpc/request:
+    post:
+      tags:
+        - DevicesRT
+      summary: Execute a command on a device (RPC)
+      description: |
+        Execute a command on a device in real-time. Only available for admin or the client itself.
+        You need to specify the method OR feature and cmd_type.
+        The command is always dispatched asynchronously and this route returns immediately.
+        When the command is being processed it returns 201 with its `id`; poll
+        `/devices/rt/{client_id}/{device_number}/rpc/response` with that `id` to get the result.
+        Notifications and cached values return 200 directly with the "result" object.
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+        - in: path
+          name: device_number
+          schema:
+            type: integer
+          required: true
+          description: Numeric number of the device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  example: v1.record.rec.start
+                  description: The command to execute on the device
+                feature:
+                  type: string
+                  example: record
+                  description: The name of the feature (board, record)
+                cmd_type:
+                  type: string
+                  example: cmd_start
+                  description: The type of command (cmd, cmd_get, cmd_set, cmd_start, cmd_stop)
+                params:
+                  type: object
+                  example: {}
+                  description: The arguments for the command
+                timeout:
+                  type: integer
+                  example: 10
+                  description: Timeout for the command execution in seconds
+      responses:
+        "200":
+          description: The command has an immediate result (notification or cached value)
+          content:
+            application/json:
+              schema:
+                type: object
+                example: { "set_status": {"state": "idle"} }
+        "201":
+          description: Command is being processed. Poll /rpc/response with the returned `id`.
+          content:
+            application/json:
+              schema:
+                type: object
+                example: { "message": "Command is being processed", "id": "3f2a1c9e-1b2c-4d5e-8f90-abcdef123456" }
+        "400":
+          $ref: '#/components/responses/400'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "418":
+          $ref: '#/components/responses/418'
+        "500":
+          description: Internal server error (command execution failed)
+          content:
+            application/json:
+              schema:
+                type: object
+                example: { "code": -32601, "message": "Invalid command" }
+        "503":
+          $ref: '#/components/responses/503'
+  /devices/rt/{client_id}/{device_number}/rpc/response:
+    post:
+      tags:
+        - DevicesRT
+      summary: Get the result of a command previously sent via /rpc/request
+      description: |
+        Poll this route with the `id` returned by `/rpc/request`. While the device has
+        not answered yet, it returns 202 (command still in progress). Once the result is
+        available it is returned (200 with the result, or the mapped error status of the
+        command). Polling is idempotent: the result stays available until it expires
+        (a few minutes after the command timeout).
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+        - in: path
+          name: device_number
+          schema:
+            type: integer
+          required: true
+          description: Numeric number of the device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+              properties:
+                id:
+                  type: string
+                  example: 3f2a1c9e-1b2c-4d5e-8f90-abcdef123456
+                  description: The RPC request id returned by /rpc/request
+      responses:
+        "200":
+          description: The result of the command execution (success)
+          content:
+            application/json:
+              schema:
+                type: object
+                example: { "set_status": {"state": "idle"} }
+        "202":
+          description: The command is still being processed
+          content:
+            application/json:
+              schema:
+                type: object
+                example: { "running": true, "message": "Command is being processed" }
+        "400":
+          $ref: '#/components/responses/400'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          description: Device not found, or unknown/expired request id
+          content:
+            application/json:
+              schema:
+                type: string
+                example: Unknown or expired request id
+        "500":
+          description: Internal server error (command execution failed)
+          content:
+            application/json:
+              schema:
+                type: object
+                example: { "code": -32601, "message": "Invalid command" }
+        "503":
+          $ref: '#/components/responses/503'
+  /devices/rt/{client_id}/{device_number}/selection/{startstop}:
+    post:
+      tags:
+        - DevicesRT
+      summary: Start or stop a selection in real-time for a device
+      description: Start or stop a selection on a device in real-time. Only available for admin or the client itself.
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+        - in: path
+          name: device_number
+          schema:
+            type: integer
+          required: true
+          description: Numeric number of the device
+        - in: path
+          name: startstop
+          schema:
+            type: string
+            enum: [start, stop]
+          required: true
+          description: Action to perform ("start" or "stop")
+      responses:
+        "200":
+          description: Selection started or stopped
+        "400":
+          description: Invalid action
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          description: No selection running (on stop)
+        "418":
+          $ref: '#/components/responses/418'
+        "500":
+          description: Selection already running (on start)
+
+  /devices/rt/{client_id}/{device_number}/lock:
+    put:
+      tags:
+        - DevicesRT
+      summary: Set or remove the real-time lock of a device
+      description: |
+        Restricts real-time access to the device to users whose ID is in the list.
+        An empty list removes the lock (free access for all users of the client).
+        Available for any user of the client, whether the device is connected or not.
+      parameters:
+        - in: path
+          name: client_id
+          schema:
+            type: integer
+          required: true
+          description: Numeric ID of the client
+        - in: path
+          name: device_number
+          schema:
+            type: integer
+          required: true
+          description: Numeric number of the device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - lock_user_ids
+              properties:
+                lock_user_ids:
+                  type: array
+                  items:
+                    type: integer
+                  description: List of user IDs allowed in real time (empty = unlock)
+                  example: [1, 2, 3]
+      responses:
+        "200":
+          description: Lock applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lock_user_ids:
+                    type: array
+                    items:
+                      type: integer
+                    example: [1, 2, 3]
+        "400":
+          description: Invalid parameter or user not in client
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+
+  /records/all:
+    post:
+      tags:
+        - Records
+      summary: Get all record informations
+      description: Get rec in scope (sport for coach, all for admin, etc.)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  example: associated
+                  description: "Type of records to get (new, associated or all)"
+                pageSize:
+                  type: integer
+                  example: 10
+                pageId:
+                  type: integer
+                  example: 1
+                  description: >
+                    1-based page number of the classic offset listing. Refused with 400 when
+                    `modifiedSince` is given and it is anything but 1: an offset composes with the
+                    cursor, so a catch-up would silently skip a whole page.
+                onlyFavorite:
+                  type: boolean
+                  example: false
+                userIds:
+                  type: array
+                  example: []
+                deviceIds:
+                  type: array
+                  example: []
+                clientIds:
+                  type: array
+                  example: []
+                groupIds:
+                  type: array
+                  example: []
+                exerciseIds:
+                  type: array
+                  example: []
+                sportIds:
+                  type: array
+                  example: []
+                record_type:
+                  type: string
+                  example: ""
+                  description: "Filter by record type (record, scenario, seance, video)"
+                scenario_ids:
+                  type: array
+                  items:
+                    type: integer
+                  example: []
+                  description: Scenario ids, empty to select all
+                minDate:
+                  type: string
+                  format: date-time
+                  example: "2023-11-20T00:00:00"
+                maxDate:
+                  type: string
+                  format: date-time
+                  example: "2030-12-04T00:00:00"
+                modifiedSince:
+                  type: string
+                  example: "2026-09-01T14:22:08.512000|8471"
+                  description: >
+                    Either an ISO 8601 datetime (naive or with an offset, `Z` accepted), to start
+                    a catch-up from a known date, or a `next_since` cursor received from a
+                    previous answer, to read the following page. Sending it orders the records by
+                    modification date ascending, tie-broken by id, and adds `next_since` to the
+                    answer. Same behaviour as `GET /records?since=...`, same view function. A
+                    bare datetime is a **lower bound** and keeps the records modified at that
+                    exact date; a value that is neither a datetime nor a cursor we handed out
+                    answers 400; an **empty** value applies no filter at all and returns no
+                    cursor. **Cannot be combined with a `pageId` other than 1** (400).
+                timezone:
+                  type: string
+                  example: 'Europe/Paris'
+                  description: >
+                    IANA timezone the minDate and maxDate values are read in. Defaults to
+                    'Europe/Paris'. Does not affect modifiedSince, which carries its own offset
+                    or none.
+                include_seances_subrecords:
+                  type: boolean
+                  example: false
+                  description: >
+                    Include the records held inside a seance instead of the seance alone
+                fulldata:
+                  type: boolean
+                  example: false
+      responses:
+        "200":
+          description: Record data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 120
+                  next_since:
+                    type: string
+                    example: "2026-09-01T14:22:08.512000|8471"
+                    description: >
+                      Opaque cursor to pass back verbatim as `modifiedSince` (or as `since` on
+                      `GET /records`) to read the following page. Do not interpret it as a date,
+                      do not reformat it: its shape may change, and a cursor we handed out is
+                      always accepted as it is. Present only when `modifiedSince` was given and
+                      the page is not empty — its **absence is the end of the pagination**, and
+                      the only reliable stop condition.
+                  records:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Record'
+                    example: []
+        "400":
+          description: >
+            A malformed parameter, named by the answer: `Invalid pageSize: expected an integer`,
+            `Invalid userIds: expected a list of integers`, `Invalid modifiedSince: <value>` for a
+            cursor that is neither a datetime nor one we handed out, or the conflict
+            `pageId cannot be combined with since`.
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "500":
+          $ref: '#/components/responses/500'
+  /records:
+    get:
+      tags:
+        - Records
+      summary: List the records in scope, paginated
+      description: >
+        Same filters, same access control and same implementation as `POST /records/all`, taken in
+        the query string instead of a JSON body. With `since`, this is the catch-up route a third
+        party polls to recover the record events it missed while its webhook endpoint was
+        unreachable: the records come back ordered by modification date ascending, tie-broken by
+        id, and `next_since` is the cursor of the following page. Walk the pages until an answer
+        carries no `next_since`; that is the end of the catch-up.
+      parameters:
+        - in: query
+          name: since
+          schema:
+            type: string
+          example: "2026-09-01T14:22:08.512000|8471"
+          description: >
+            Either an ISO 8601 datetime (naive or with an offset, `Z` accepted), to start a
+            catch-up from a known date, or a `next_since` cursor received from a previous answer,
+            to read the following page. A cursor advances strictly, so a page never serves back
+            the record it ended on; a bare datetime is a **lower bound**, so it keeps every record
+            modified at that exact date — the only repetition possible, and only on the very first
+            call. A value that is neither a datetime nor a cursor we handed out answers 400; an
+            **empty** value is not an error, it simply applies no filter at all and the answer then
+            carries no `next_since`. **Cannot be combined with `pageId`** (400): the cursor is the
+            pagination, set `pageSize` and follow `next_since`.
+        - in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 10
+          description: Page size, -1 for every selected record
+        - in: query
+          name: pageId
+          schema:
+            type: integer
+            default: 1
+          description: >
+            1-based page number of the classic offset listing. **Refused with 400 when `since` is
+            given** and it is anything but 1: an offset composes with the cursor, so a catch-up
+            would silently skip a whole page. `pageSize` stays free.
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [all, new, associated]
+            default: all
+        - in: query
+          name: userIds
+          schema:
+            type: string
+          description: Comma-separated user ids, empty to select all
+        - in: query
+          name: deviceIds
+          schema:
+            type: string
+          description: Comma-separated device ids, empty to select all
+        - in: query
+          name: clientIds
+          schema:
+            type: string
+          description: >
+            Comma-separated client ids, empty to select all. Narrowed to what the role allows: a
+            Manager only ever sees its own client, and asking for another one answers 403.
+        - in: query
+          name: groupIds
+          schema:
+            type: string
+          description: Comma-separated group ids, empty to select all
+        - in: query
+          name: exerciseIds
+          schema:
+            type: string
+          description: Comma-separated exercise ids, empty to select all
+        - in: query
+          name: sportIds
+          schema:
+            type: string
+          description: Comma-separated sport ids, empty to select all
+        - in: query
+          name: scenario_ids
+          schema:
+            type: string
+          description: Comma-separated scenario ids, empty to select all
+        - in: query
+          name: record_type
+          schema:
+            type: string
+          description: "Filter by record type (record, scenario, seance, video)"
+        - in: query
+          name: minDate
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: maxDate
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: timezone
+          schema:
+            type: string
+            default: 'Europe/Paris'
+          description: >
+            IANA timezone the minDate and maxDate values are read in. Does not affect since,
+            which carries its own offset or none.
+        - in: query
+          name: onlyFavorite
+          schema:
+            type: boolean
+        - in: query
+          name: include_seances_subrecords
+          schema:
+            type: boolean
+          description: Include the records held inside a seance instead of the seance alone
+        - in: query
+          name: fulldata
+          schema:
+            type: boolean
+        - in: query
+          name: modifiedSince
+          schema:
+            type: string
+          description: Accepted as a synonym of `since`; `since` wins when both are given
+      responses:
+        "200":
+          description: Record data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 120
+                  next_since:
+                    type: string
+                    example: "2026-09-01T14:22:08.512000|8471"
+                    description: >
+                      Opaque cursor to pass back verbatim as `since` to read the following page.
+                      Do not interpret it as a date, do not reformat it: its shape may change, and
+                      a cursor we handed out is always accepted as it is. Present only when
+                      `since` was given and the page is not empty — its **absence is the end of
+                      the pagination**, and the only reliable stop condition. `total` counts the
+                      records left after the cursor, so it shrinks page after page and says
+                      nothing about the end.
+                  records:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Record'
+                    example: []
+        "400":
+          description: >
+            A malformed parameter, named by the answer: `Invalid pageSize: expected an integer`,
+            `Invalid userIds: expected a list of integers`, `Invalid modifiedSince: <value>` for a
+            cursor that is neither a datetime nor one we handed out, or the conflict
+            `pageId cannot be combined with since`.
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "500":
+          $ref: '#/components/responses/500'
+  /records/{rec_id}:
+    get:
+      tags:
+        - Records
+      summary: Get record informations
+      description: ""
+      parameters:
+        - $ref: '#/components/parameters/rec_id'
+      responses:
+        "200":
+          description: Record data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+  /records/{rec_id}/file/{file_type}:
+    post:
+      tags:
+        - Records
+      summary: Download a record file (raw, csv, pdf, etc.)
+      description: Accessible on admin, coach on record group or athlete associate to record
+      parameters:
+        - $ref: '#/components/parameters/rec_id'
+        - in: path
+          name: file_type
+          required: true
+          schema:
+            type: string
+            example: decoded
+          description: One of raw, decoded, pdf, stats or specific_stats
+        - in: query
+          name: sel_id
+          schema:
+            type: integer
+          required: false
+          description: The selection id (for decoded and pdf download only)
+      responses:
+        "200":
+          description: File downloaded
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "500":
+          $ref: '#/components/responses/500'
+
+  /records/data:
+    post:
+      tags:
+      - Records
+      summary: Get some decoded data for plotting
+      description: |
+        Get some decoded data for plotting
+        You can select multiple range of data on multiples records in the same request.
+        The response contains a dict with all records and all data selections for each record in the same order.
+
+        The list of the data that can be selected can be optained with `GET /records/<rec_id>` (available_data field).
+        ```
+        data range params: (for each data selection)
+            x:
+                - type: range or selection
+                - name: the name of the x axis (for example T or D)
+                - range: [x-start, x-end] (only for range type). [] to select all
+                - num: the num of the selection if you want to select a selection (range is computed automatically)
+                - maxData: the max number of points to return. If there are more points, a lttb is applied
+                - normalize: (optional, bool) if True, offsets the data so the selection starts at 0. only on selection type
+                - user_offset: (optional, float) additional offset applied to x values (default 0.0)
+                - x_sub_range: (optional, [float, float]) sub-range in normalized (display) coordinates (part of selection)
+            y:
+                - list of the data to select. For example: ["imu.acc_x", "imu.acc_y" ]
+            slot_id: (optional, int) arbitrary slot identifier echoed back in the response
+            label: (optional, str) arbitrary label echoed back in the response
+
+        response range format: (for each data selection)
+            xrange: Can contains D, T and x ranges
+                - D: [D-start, D-end] (only if distance is available)
+                - T: [T-start, T-end]
+                - x: [x-start, x-end] -> x is the selected range type (T or D)
+            selectionNum: the selection num if the type was selection, else null
+            slot_id: echoed from the request if provided
+            label: echoed from the request if provided
+            data: dict of the selected data with the following format:
+                "imu.acc_x": {
+                    "id": 0,
+                    "label": "imu.acc_x",  # name of the data
+                    "title": "imu.acc_x",  # title (to display on the plot for example)
+                    "data": [{"x": 2.79, "y": 0.123}, {"x": 2.80, "y": 0.125}, ...],
+                    "yRange": [ymin, ymax],  # if set, the y range to apply on the plot
+                    "color": "#ff0000",  # if set, the color to use for the plot
+                    "type": "number"  # can be number, array32x32, etc.
+                },
+                ...
+        ```
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              example: {
+                "data": {
+                    "818": [
+                        {
+                            "x": {
+                                "type": "range",
+                                "name": "T",
+                                "range": [ 10, 30 ],
+                                "maxData": 500
+                            },
+                            "y": [ "imu.acc_x","imu.acc_y","imu.acc_z" ]
+                        },
+                        {
+                            "x": {
+                                "type": "range",
+                                "name": "T",
+                                "range": [],
+                                "maxData": 500
+                            },
+                            "y": [ "imu.acc_x" ]
+                        }
+                    ]
+                }
+              }
+      responses:
+        "200":
+          description: All wanted data for all records
+          content:
+            application/json:
+              schema:
+                type: object
+                example: {
+                  "data": {
+                    "818": [
+                      {
+                        "data": {
+                          "imu.acc_x": {
+                            "color": null,
+                            "data": [ { "x": 10.001, "y": 0.24262 }, ..., { "x": 29.996, "y": 0.27987 } ],
+                            "id": 0,
+                            "label": "imu.acc_x",
+                            "title": "imu.acc_x",
+                            "type": "number",
+                            "yRange": []
+                          },
+                          "imu.acc_y": {
+                            "color": null,
+                            "data": [ { "x": 10.001, "y": 0.0446 }, ..., { "x": 29.996, "y": -0.0094 } ],
+                            "id": 1,
+                            "label": "imu.acc_y",
+                            "title": "imu.acc_y",
+                            "type": "number",
+                            "yRange": []
+                          },
+                          "imu.acc_z": {
+                            "color": null,
+                            "data": [ { "x": 10.001, "y": 9.67984 }, ..., { "x": 29.996, "y": 9.62028 } ],
+                            "id": 2,
+                            "label": "imu.acc_z",
+                            "title": "imu.acc_z",
+                            "type": "number",
+                            "yRange": []
+                          }
+                        },
+                        "xrange": {
+                            "D": [],
+                            "T": [ 10, 29.995 ],
+                            "x": [ 10, 29.995 ]
+                        },
+                        "selectionNum": null
+                      },
+                      {
+                        "data": {
+                          "imu.acc_x": {
+                            "color": null,
+                            "data": [ { "x": 2.791, "y": 0.25851 }, ..., { "x": 58.786, "y": 0.32502 } ],
+                            "id": 0,
+                            "label": "imu.acc_x",
+                            "title": "imu.acc_x",
+                            "type": "number",
+                            "yRange": []
+                          }
+                        },
+                        "xrange": {
+                          "D": [],
+                          "T": [ 2.79, 58.795 ],
+                          "x": [ 2.79, 58.795 ]
+                        },
+                        "selectionNum": null
+                      }
+                    ]
+                  }
+                }
+        "400":
+          $ref: '#/components/responses/400'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "500":
+          $ref: '#/components/responses/500'
+
+  /records/gps_data:
+    post:
+      tags:
+      - Records
+      summary: Get GPS data filtered by LOD score for map rendering
+      description: |
+        Get GPS coordinates filtered by a pre-computed LOD (Level of Detail) importance score for
+        efficient map rendering. Uses per-point Douglas-Peucker importance scores computed at analysis
+        time when available; falls back to on-the-fly computation otherwise.
+        Each record entry contains one or more GPS source descriptors (one per GPS source in the record).
+        Altitude is included in coordinates when `gps_vars.alt` is provided.
+        Additional scalar variables (e.g. speed) are returned at the same indices as the filtered track.
+        ```
+        Request params: (for each GPS entry per record)
+            gps_vars:
+                - lat: variable name for latitude (e.g. "gps.latitude")
+                - lng: variable name for longitude (e.g. "gps.longitude")
+                - alt: variable name for altitude (optional, null to omit)
+                - pdop: variable name for PDOP (optional). When null, auto-derived from the latitude name
+                  (e.g. "gps.latitude" -> "gps.PDOP", "mini.gps_latitude" -> "mini.gps_PDOP")
+                - nsat: variable name for nSat (optional). When null, auto-derived from the latitude name
+                  (e.g. "gps.latitude" -> "gps.nSat", "mini.gps_latitude" -> "mini.gps_nSat")
+            vars: list of additional scalar variables to return at filtered indices
+            epsilon: LOD threshold in meters (optional — if provided, overrides auto-scale)
+            target_min: minimum number of GPS points to return when auto-scaling (default 100)
+            target_max: maximum number of GPS points to return when auto-scaling (default 10000)
+            pdop_max: optional float — when set and the PDOP column exists, points with PDOP > pdop_max
+                      are dropped (NaN PDOP values are kept). Default null disables the filter.
+            nsat_min: optional int — when set and the nSat column exists, points with nSat < nsat_min
+                      are dropped (NaN nSat values are kept). Default null disables the filter.
+                      When both pdop_max and nsat_min are set (with both columns available), conditions
+                      combine in AND mode.
+            x:
+                - type: "range" or "selection"
+                - name: X axis name — "T" (time), "D" (distance) or "T_norm"
+                - range: [start, end] filter (only for type "range"; [] = whole record)
+                - num: selection number (only for type "selection")
+
+        Response format:
+            "<rec_id>": {
+                "<lat_var>": {
+                    "type": "FeatureCollection",
+                    "features": [{
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [[lng, lat], ...]   // [lng, lat, alt] when alt is provided
+                        },
+                        "properties": {
+                            "values": {
+                                "T": [0.0, 0.5, ...],          // timestamps of kept points (always present)
+                                "D": [0.0, 12.5, ...],         // distances (present if available in record)
+                                "T_norm": [0.0, 0.5, ...],     // normalized time (present if available in record)
+                                "<var>": [12.5, ...]            // extra vars at same indices
+                            },
+                            "stats": {
+                                "<var>": {"min": 0.0, "max": 25.0, "mean": 12.0}
+                            }
+                        }
+                    }]
+                }
+            }
+        ```
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - gps_vars
+                      properties:
+                        gps_vars:
+                          type: object
+                          required:
+                            - lat
+                            - lng
+                          properties:
+                            lat:
+                              type: string
+                              description: Variable name for latitude (e.g. "gps.latitude")
+                            lng:
+                              type: string
+                              description: Variable name for longitude (e.g. "gps.longitude")
+                            alt:
+                              type: [string, "null"]
+                              description: Variable name for altitude (null to omit)
+                            pdop:
+                              type: [string, "null"]
+                              description: |
+                                Variable name for PDOP (null to auto-derive from the latitude name —
+                                e.g. "gps.latitude" -> "gps.PDOP", "mini.gps_latitude" -> "mini.gps_PDOP").
+                            nsat:
+                              type: [string, "null"]
+                              description: |
+                                Variable name for nSat (null to auto-derive from the latitude name —
+                                e.g. "gps.latitude" -> "gps.nSat", "mini.gps_latitude" -> "mini.gps_nSat").
+                        vars:
+                          type: array
+                          items:
+                            type: string
+                          description: Additional scalar variables to return at filtered indices
+                          default: []
+                        epsilon:
+                          type: [number, "null"]
+                          description: "If provided, overrides auto-scale: only points with LOD score >= epsilon are kept"
+                        target_min:
+                          type: integer
+                          default: 100
+                          description: Minimum number of GPS points to return when auto-scaling
+                        target_max:
+                          type: integer
+                          default: 10000
+                          description: Maximum number of GPS points to return when auto-scaling
+                        pdop_max:
+                          type: [number, "null"]
+                          description: |
+                            Optional PDOP threshold. When set and the PDOP column exists, points with
+                            PDOP > pdop_max are dropped (NaN PDOP values are kept). Default null disables the filter.
+                          default: null
+                        nsat_min:
+                          type: [integer, "null"]
+                          description: |
+                            Optional nSat threshold. When set and the nSat column exists, points with
+                            nSat < nsat_min are dropped (NaN nSat values are kept). Default null disables the filter.
+                            Combines with pdop_max in AND mode when both are active.
+                          default: null
+                        x:
+                          type: object
+                          description: X axis filter configuration
+                          properties:
+                            type:
+                              type: string
+                              enum: [range, selection]
+                              default: range
+                              description: '"range" to filter by explicit bounds, "selection" to use a saved selection'
+                            name:
+                              type: string
+                              enum: [T, D, T_norm]
+                              default: T
+                              description: X axis variable — T (time in seconds), D (distance in meters), T_norm
+                            range:
+                              type: array
+                              items:
+                                type: number
+                              description: "Filter bounds [start, end] (type range only; [] = whole record)"
+                              default: []
+                            num:
+                              type: [integer, "null"]
+                              description: Selection number (type selection only)
+              example: {
+                "data": {
+                  "818": [
+                    {
+                      "gps_vars": {
+                        "lat": "gps.latitude",
+                        "lng": "gps.longitude",
+                        "alt": null,
+                        "pdop": null,
+                        "nsat": null
+                      },
+                      "vars": ["gps.speed"],
+                      "epsilon": null,
+                      "target_min": 100,
+                      "target_max": 10000,
+                      "pdop_max": 5,
+                      "nsat_min": 6,
+                      "x": {"type": "range", "name": "T", "range": [0.0, 100.0]}
+                    }
+                  ]
+                }
+              }
+      responses:
+        "200":
+          description: GeoJSON FeatureCollections keyed by record id and latitude variable name
+          content:
+            application/json:
+              schema:
+                type: object
+                example: {
+                  "818": {
+                    "gps.latitude": {
+                      "type": "FeatureCollection",
+                      "features": [
+                        {
+                          "type": "Feature",
+                          "geometry": {
+                            "type": "LineString",
+                            "coordinates": [ [2.3522, 48.8566], [2.3530, 48.8572], [2.3545, 48.8580] ]
+                          },
+                          "properties": {
+                            "values": {
+                              "T": [0.0, 0.5, 1.2],
+                              "D": [0.0, 6.3, 15.1],
+                              "gps.speed": [12.5, 12.6, 13.1]
+                            },
+                            "stats": {
+                              "gps.speed": {"min": 12.5, "max": 13.1, "mean": 12.73}
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+        "400":
+          $ref: '#/components/responses/400'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "500":
+          $ref: '#/components/responses/500'
+
+  /records/polar_data:
+    post:
+      tags:
+      - Records
+      summary: Get polar (angle / radius) plot data for one or more records
+      description: |
+        Compute polar plot data (angular axis vs radius value(s)) for the pi3d "force / crank
+        angle" visualisation. The angular axis is a 0-360° variable (e.g. `Theta`), the radius is
+        one or more value variables (e.g. `Ft_d` / `Ft_g`), and pedalling cycles are split by a
+        cycle variable (default `motif_id`). Each cycle is interpolated on a shared angular grid
+        (`angular_step` degrees, 360/0 wrap handled). The response uses a compact columnar format:
+        BOTH the per-cycle series and the always-present `mean` series are returned (the client
+        decides what to display). A single time-like variable (`x.name`) is loaded; each cycle
+        carries its own `x` series aligned with `theta`.
+        ```
+        Request params: (for each polar entry per record)
+            angle_var: REQUIRED angular axis variable (0-360°, e.g. "Theta")
+            radius_vars: REQUIRED list of radius value variables (e.g. ["Ft_d", "Ft_g"])
+            cycle_var: cycle id variable (default "motif_id"). Rows with cycle_var NaN or <= 0 are dropped.
+            color_var: optional variable mapped to a per-cycle scalar (mean over the cycle, default null)
+            filter: optional {"varname": str, "min": float|null, "max": float|null}. A whole cycle is
+                     dropped when its mean of varname falls outside [min, max] (default null disables it).
+            angular_step: angular binning step in degrees (default 5)
+            max_points: total budget of plotted points across shown cycles, NOT a cycle count (default 5000). Cycles are sub-sampled so that n_cycles * (points per cycle, ~360/angular_step + 1) stays under it
+            x:
+                - type: "range" or "selection"
+                - name: X axis name — "T" (time), "D" (distance) or "T_norm" (single column loaded)
+                - range: [start, end] filter (only for type "range"; [] = whole record)
+                - num: selection number (only for type "selection")
+
+        Response format:
+            "<rec_id>": {
+                "theta": [0, step, ..., 360],                 // shared grid + 360° closing point
+                "x_name": "T",
+                "xrange": [min, max],
+                "cycles": [
+                    {"motif_id": 12,
+                     "xt": [...],                               // cursor times (monotone, offset applied)
+                     "xa": [...],                               // crank angle at each xt, UNWRAPPED
+                                                                //   (apply xa % 360), len == len(theta)
+                     "values": {"Ft_d": [...], "Ft_g": [...]},  // binned on theta, len == len(theta)
+                     "color_mean": 85.3}                         // only when color_var set
+                ],
+                "mean": {"values": {"Ft_d": [...], "Ft_g": [...]}},  // over ALL valid cycles
+                "color_var": "Cadence",                              // null when not requested
+                "color_range": [min, max],                           // null when no color_var
+                "meta": {"n_cycles_total": 42, "n_cycles_shown": 30, "angular_step": 5}
+            }
+        ```
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - angle_var
+                        - radius_vars
+                      properties:
+                        angle_var:
+                          type: string
+                          description: Angular axis variable (0-360°, e.g. "Theta")
+                        radius_vars:
+                          type: array
+                          items:
+                            type: string
+                          description: Radius value variables (e.g. ["Ft_d", "Ft_g"])
+                        cycle_var:
+                          type: string
+                          default: motif_id
+                          description: Cycle id variable. Rows with cycle_var NaN or <= 0 are dropped.
+                        color_var:
+                          type: [string, "null"]
+                          default: null
+                          description: Optional variable used for color mapping (visualMap)
+                        filter:
+                          type: [object, "null"]
+                          default: null
+                          description: |
+                            Optional per-cycle value filter. A whole cycle is dropped when its mean of
+                            varname is NaN, below min or above max. Bounds are individually optional
+                            (null disables that bound).
+                          properties:
+                            varname:
+                              type: string
+                            min:
+                              type: [number, "null"]
+                            max:
+                              type: [number, "null"]
+                        angular_step:
+                          type: number
+                          default: 5
+                          description: Angular binning step in degrees
+                        max_points:
+                          type: integer
+                          default: 5000
+                          description: Total budget of plotted points across shown cycles (NOT a cycle count). Cycles are sub-sampled so that n_cycles * points-per-cycle (~360/angular_step + 1) stays under this cap.
+                        x:
+                          type: object
+                          description: X axis filter configuration
+                          properties:
+                            type:
+                              type: string
+                              enum: [range, selection]
+                              default: range
+                              description: '"range" to filter by explicit bounds, "selection" to use a saved selection'
+                            name:
+                              type: string
+                              enum: [T, D, T_norm]
+                              default: T
+                              description: X axis variable — the single time-like column loaded (T, D or T_norm)
+                            range:
+                              type: array
+                              items:
+                                type: number
+                              description: "Filter bounds [start, end] (type range only; [] = whole record)"
+                              default: []
+                            num:
+                              type: [integer, "null"]
+                              description: Selection number (type selection only)
+                            normalize:
+                              type: boolean
+                              default: false
+                              description: When true (selection only), offset the range so the selection starts at 0
+                            user_offset:
+                              type: number
+                              default: 0
+                              description: Additional offset applied to the returned x values
+                            x_sub_range:
+                              type: array
+                              items:
+                                type: number
+                              description: "Optional sub-range [start, end] in normalized (display) coords, for zoom reload"
+              example: {
+                "data": {
+                  "818": [
+                    {
+                      "angle_var": "Theta",
+                      "radius_vars": ["Ft_d", "Ft_g"],
+                      "cycle_var": "motif_id",
+                      "color_var": null,
+                      "filter": {"varname": "Cadence", "min": 10, "max": null},
+                      "angular_step": 5,
+                      "max_points": 5000,
+                      "x": {"type": "range", "name": "T", "range": [0.0, 100.0]}
+                    }
+                  ]
+                }
+              }
+      responses:
+        "200":
+          description: |
+            Polar plot data (columnar) keyed by record id. A shared `theta` grid (0..360 with a
+            360° closing point), the per-cycle series and the always-present `mean` series, plus meta.
+            Each cycle carries a TIME-ordered cursor polyline: `xt` (times, monotone, offset applied)
+            and `xa` (crank angle at each `xt`, UNWRAPPED so monotone — apply `xa % 360`). Every
+            `cycles[*].xt`, `cycles[*].xa`, `cycles[*].values` and `mean.values` series has the same
+            length as `theta`.
+          content:
+            application/json:
+              schema:
+                type: object
+                example: {
+                  "818": {
+                    "theta": [0, 5, 10, 355, 360],
+                    "x_name": "T",
+                    "xrange": [0.0, 100.0],
+                    "cycles": [
+                      {
+                        "motif_id": 12,
+                        "xt": [10.0, 10.3, 10.6, 10.9, 11.2],
+                        "xa": [209.0, 280.0, 360.0, 450.0, 560.0],
+                        "values": {"Ft_d": [12.3, 13.1, 11.8, 12.0, 12.3], "Ft_g": [9.1, 9.4, 8.9, 9.0, 9.1]},
+                        "color_mean": 85.3
+                      }
+                    ],
+                    "mean": {"values": {"Ft_d": [12.1, 12.9, 11.6, 11.9, 12.1], "Ft_g": [9.0, 9.3, 8.8, 8.9, 9.0]}},
+                    "color_var": "Cadence",
+                    "color_range": [70.0, 95.0],
+                    "meta": {"n_cycles_total": 42, "n_cycles_shown": 30, "angular_step": 5}
+                  }
+                }
+        "400":
+          $ref: '#/components/responses/400'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "409":
+          $ref: '#/components/responses/409'
+        "500":
+          $ref: '#/components/responses/500'
+
+  /clients/{client_id}:
+    get:
+      tags:
+        - Clients
+      summary: Get a client
+      description: Available for admin or coach in the client
+      parameters:
+        - $ref: '#/components/parameters/client_id'
+      responses:
+        "200":
+          description: The client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+
+  /clients/{client_id}/sports:
+    get:
+      tags:
+        - Clients
+      summary: Get all sports in a client
+      description: Available for all connected users
+      parameters:
+        - $ref: '#/components/parameters/client_id'
+      responses:
+        "200":
+          description: The sports list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Sport'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+
+  /clients/{client_id}/groups:
+    get:
+      tags:
+        - Clients
+      summary: Get all groups in a client
+      description: Available for admin or coach in the client
+      parameters:
+        - $ref: '#/components/parameters/client_id'
+      responses:
+        "200":
+          description: The groups list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Group'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+
+  /clients/{client_id}/users:
+    get:
+      tags:
+        - Clients
+        - Users
+      summary: Get all users in a client
+      description: Available for admin or coach in the client
+      parameters:
+        - $ref: '#/components/parameters/client_id'
+        - in: query
+          name: active
+          schema:
+            type: boolean
+            example: true
+          required: false
+          description: Select only active users
+        - in: query
+          name: soft
+          schema:
+            type: boolean
+            example: false
+          required: false
+          description: Get only a few user information (id, mail, firstname, lastname, active)
+      responses:
+        "200":
+          description: The user list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 120
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                    example: []
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+
+  /clients/{client_id}/exercises:
+    get:
+      tags:
+        - Clients
+      summary: Get all exercises in a client
+      description: Available for admin or coach in the client
+      parameters:
+        - $ref: '#/components/parameters/client_id'
+      responses:
+        "200":
+          description: The exercises list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Exercise'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+
+  /clients/{client_id}/scenarios:
+    get:
+      tags:
+        - Clients
+      summary: Get all scenarios in a client
+      description: Available for admin or coach in the client
+      parameters:
+        - $ref: '#/components/parameters/client_id'
+        - in: query
+          name: is_calib
+          schema:
+            type: boolean
+            example: false
+          required: false
+          description: Filter calibration scenarios only
+      responses:
+        "200":
+          description: The scenarios list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Scenario'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+
+  /ping:
+    get:
+      tags:
+        - Utils
+      summary: Simply check if the API is available
+      responses:
+        "200":
+          description: API is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected:
+                    type: boolean
+                    example: true
+                  type:
+                    type: string
+                    example: User
+                  login:
+                    type: string
+                    example: mail@phyling.fr
+
+components:
+  schemas:
+    OAuthTokenRequest:
+      description: >
+        Token request body, accepted as JSON or as application/x-www-form-urlencoded.
+        client_id and client_secret may be omitted here when they are sent in an
+        `Authorization: Basic` header.
+      type: object
+      properties:
+        grant_type:
+          type: string
+          enum: ["authorization_code", "refresh_token"]
+          example: "authorization_code"
+        client_id:
+          type: string
+          example: "clientid_abc123"
+        client_secret:
+          type: string
+          example: "secret_456"
+        code:
+          type: string
+          example: "abc123def456"
+          description: Required for the authorization_code grant
+        refresh_token:
+          type: string
+          example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+          description: Required for the refresh_token grant
+        redirect_uri:
+          type: string
+          example: "https://example.com/callback"
+          description: Required for the authorization_code grant, ignored otherwise
+      required:
+        - grant_type
+    OAuthRevokeRequest:
+      description: >
+        Revocation request body, accepted as JSON or as application/x-www-form-urlencoded.
+        client_id and client_secret may be omitted here when they are sent in an
+        `Authorization: Basic` header.
+      type: object
+      properties:
+        token:
+          type: string
+          example: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+        token_type_hint:
+          type: string
+          enum: ["access_token", "refresh_token"]
+          example: "refresh_token"
+        client_id:
+          type: string
+          example: "clientid_abc123"
+        client_secret:
+          type: string
+          example: "secret_456"
+      required:
+        - token
+    OAuthUserInfo:
+      description: Identity of the user who authorized the calling OAuth application
+      type: object
+      properties:
+        sub:
+          type: string
+          description: The user id, as a string (OpenID Connect naming)
+          example: "42"
+        user_id:
+          type: integer
+          description: The user id, the identifier to store on the third party side
+          example: 42
+        email:
+          type: string
+          example: "user@example.com"
+        firstname:
+          type: string
+          example: "Jean"
+        lastname:
+          type: string
+          example: "Dupont"
+        active:
+          type: boolean
+          example: true
+    WebhookEventType:
+      type: string
+      enum:
+        - record.created
+        - record.updated
+        - record.deleted
+        - user.created
+        - user.updated
+        - user.deleted
+    WebhookPayloadFormat:
+      type: string
+      description: >
+        Serialisation key, not an event sub-type: the same event on the wire in another shape.
+        "phyling" is the thin default payload (event_id, event_type, event_time, subject).
+      enum:
+        - phyling
+      example: "phyling"
+    WebhookSubscription:
+      description: One outgoing webhook endpoint declared by an OAuth application, never carrying a secret
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 42
+        app_client_id:
+          type: string
+          example: "clientid_abc123"
+        url:
+          type: string
+          example: "https://mon-serveur.example.com/webhooks/phyling"
+        event_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        payload_format:
+          $ref: '#/components/schemas/WebhookPayloadFormat'
+        active:
+          type: boolean
+          example: true
+        replay_history:
+          type: boolean
+          description: >
+            Whether the first consent of a user backfills this subscription with their recent
+            records: one `record.created` per record decoded over the last 30 days, up to 100 of
+            them, spread over several passes. Only gates that automatic backfill, never the live
+            deliveries. Set it to false to receive nothing but what happens after the consent,
+            and catch up yourself with `GET /records?since=...`.
+          example: true
+        created_at:
+          type: string
+          example: "2026-09-03 10:00:00"
+        prev_secret_expires_at:
+          type: string
+          description: Empty outside a rotation grace window
+          example: ""
+    WebhookSubscriptionWithSecret:
+      description: A subscription right after creation or a secret rotation
+      allOf:
+        - $ref: '#/components/schemas/WebhookSubscription'
+        - type: object
+          properties:
+            secret:
+              type: string
+              description: The plain signing secret. Shown only this once, store it securely.
+              example: "whsec_9f3a2c1e8b7d..."
+    WebhookSubscriptionCreateRequest:
+      type: object
+      properties:
+        client_id:
+          type: string
+          example: "clientid_abc123"
+        client_secret:
+          type: string
+          example: "secret_456"
+        url:
+          type: string
+          example: "https://mon-serveur.example.com/webhooks/phyling"
+        event_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        payload_format:
+          allOf:
+            - $ref: '#/components/schemas/WebhookPayloadFormat'
+          description: Defaults to "phyling" when omitted
+        replay_history:
+          type: boolean
+          description: >
+            Defaults to true when omitted: the first consent of a user backfills the subscription
+            with up to 100 `record.created` for the records decoded over the last 30 days. Send
+            false to only receive what happens after the consent.
+          example: true
+      required:
+        - url
+        - event_types
+    WebhookSubscriptionUpdateRequest:
+      type: object
+      description: Every field is optional, send only what changes
+      properties:
+        url:
+          type: string
+          example: "https://mon-serveur.example.com/webhooks/phyling"
+        event_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        payload_format:
+          $ref: '#/components/schemas/WebhookPayloadFormat'
+        active:
+          type: boolean
+          example: false
+        replay_history:
+          type: boolean
+          description: >
+            Only changes what a *later* first consent replays; it never replays anything on the
+            subscription it is set on.
+          example: true
+    Sport:
+      description: All informations about a sport
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: default
+        display_name:
+          type: string
+          example: '{"fr": "Défaut", "en": "Default"}'
+        text:
+          type: string
+          example: default
+        value:
+          type: integer
+          example: 1
+    Exercise:
+      description: All informations about an exercise
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Exercise
+        client_id:
+          type: integer
+          example: 2
+    Group:
+      description: All informations about a group
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Default
+        client_id:
+          type: integer
+          example: 2
+    User:
+      description: User object
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 10
+        active:
+          type: boolean
+          example: true
+        client_id:
+          type: integer
+          example: 2
+        created_date:
+          type: string
+          example: '0000-00-00'
+        externalAPI:
+          type: object
+          example: {}
+        firstname:
+          type: string
+          example: name
+        lastname:
+          type: string
+          example: lastname
+        mail:
+          type: string
+          example: example@phyling.fr
+        psqs_id:
+          type: string
+          example: ''
+        roles:
+          type: array
+          example: ['Manager', 'Athlete']
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/Group'
+    OAuthApp:
+      description: OAuth application
+      type: object
+      properties:
+        client_id:
+          type: string
+          example: "clientid_abc123def456"
+        name:
+          type: string
+          example: "My OAuth App"
+        redirect_uris:
+          type: array
+          items:
+            type: string
+          example: ["https://example.com/callback", "https://app.example.com/auth"]
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          example: "2023-12-04T10:30:00+00:00"
+          description: ISO format datetime
+        clients:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                example: 1
+              name:
+                type: string
+                example: "phyling"
+              display_name:
+                type: string
+                example: "Phyling"
+    Client:
+      description: All informations about a client
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: phyling
+        display_name:
+          type: string
+          example: phyling
+    ClientFull:
+      description: All informations about a client
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: phyling
+        display_name:
+          type: string
+          example: phyling
+        enabled:
+          type: boolean
+          example: true
+        cloud_enabled:
+          type: boolean
+          example: false
+        video_enabled:
+          type: boolean
+          example: false
+        video_quality:
+          type: string
+          example: 720p
+        can_use_api_keys:
+          type: boolean
+          example: false
+        can_create_oauth_app:
+          type: boolean
+          example: false
+        external_ids:
+          type: array
+          example: []
+        external_names:
+          type: array
+          example: []
+        mallette_ids:
+          type: array
+          example: []
+        mallette_names:
+          type: array
+          example: []
+        sport_ids:
+          type: array
+          example: []
+        sport_names:
+          type: array
+          example: []
+        sensor_ids:
+          type: array
+          example: []
+        sensor_names:
+          type: array
+          example: []
+        scenarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Scenario'
+          example: []
+        compiled_scenarios:
+          type: array
+          example: []
+    Device:
+      description: All informations about a device
+      type: object
+      properties:
+        number:
+          type: integer
+          example: 10200042
+        name:
+          type: string
+          example: "Maxi 42"
+        enabled:
+          type: boolean
+          example: true
+        type:
+          type: string
+          example: "Maxi-Phyling"
+        created_date:
+          type: string
+          example: '0000-00-00'
+        client_id:
+          type: integer
+          example: 1
+        client_name:
+          type: string
+          example: "Client Name"
+        group_id:
+          type: integer
+          example: 1
+        group_name:
+          type: string
+          example: "Group Name"
+        manager_comment:
+          type: string
+          example: ""
+        comment:
+          type: string
+          example: ""
+        other_data:
+          type: object
+          example: {}
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+          example: []
+        meca_sensor_names:
+          type: array
+          items:
+            type: string
+            example: "C0074M0042"
+        in_stock:
+          type: boolean
+          example: false
+          description: Whether the device is in stock
+        lock_user_ids:
+          type: array
+          items:
+            type: integer
+          example: []
+          description: List of user IDs allowed in real time (empty = free access)
+    Record:
+      description: All informations about a record
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        internal_maxi_id:
+          type: integer
+          example: 1
+        client_id:
+          type: integer
+          example: 1
+        date:
+          type: string
+          example: "27/05/2025 10:44:57"
+        dt_created:
+          type: string
+          example: "2025-05-27T10:44:57.526"
+        timestamp:
+          type: integer
+          example: 1748335497526
+        timezone:
+          type: string
+          example: "Europe/Paris"
+        exercise_name:
+          type: string
+          example: ""
+        favorite:
+          type: boolean
+          example: false
+        group_id:
+          type: integer
+          example: 1
+        group_name:
+          type: string
+          example: "Default"
+        record_type:
+          type: string
+          example: "record"
+        record_type_name:
+          type: string
+          example: "Normal"
+        use_starting_time:
+          type: boolean
+          example: true
+        comment:
+          type: string
+          example: ""
+        cloud_state:
+          type: string
+          example: not_uploaded
+        size:
+          type: integer
+          example: 0
+        scenario_classname:
+          type: string
+          example: ""
+        scenario_id:
+          type: integer
+          example: 0
+        seance_id:
+          type: integer
+          example: 0
+        selections:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                example: 1
+              num:
+                type: integer
+                example: 1
+        available_data:
+          type: object
+          example: {T: {description: 'Temps', 'unit': 's'}}
+        basename:
+          type: string
+          example: Phyling_20220613_094800_2
+        nb_errors:
+          type: integer
+          example: 0
+        sport_id:
+          type: integer
+          example: 1
+        sport_name:
+          type: string
+          example: Default
+        sport_disp_name:
+          type: string
+          example: "Défaut"
+        other_data:
+          type: string
+          example: {}
+        user_ids:
+          type: array
+          items:
+            type: integer
+            example: 1
+        users:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                example: 1
+              mail:
+                type: string
+                example: tim.nicolas@phyling.fr
+              firstname:
+                type: string
+                example: Tim
+              lastname:
+                type: string
+                example: Nicolas
+          example: []
+        wrong_time:
+          type: boolean
+          example: false
+    Scenario:
+      description: All informations about a scenario
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: CMJ avec entraineur
+        display_name:
+          type: string
+          example: "{\"fr\": \"CMJ\", \"en\": \"CMJ\"}"
+        text:
+          type: string
+          example: CMJ
+        is_calib:
+          type: boolean
+          example: false
+        is_compiled:
+          type: boolean
+          example: false
+        client_id:
+          type: integer
+          example: 1
+        classname:
+          type: string
+          example: CMJEntraineurScenario
+        missing_class:
+          type: boolean
+          example: false
+        comment:
+          type: string
+          example: ""
+        config:
+          type: object
+          example: {"id": 1, "name": "CMJScenario"}
+        params:
+          type: object
+          example: |
+            [
+              {
+                "default": 3,
+                "description": {
+                  "en": "Number of jumps",
+                  "fr": "Nombre de sauts"
+                },
+                "name": "nb_rep",
+                "optional": false,
+                "type": "int",
+                "unit": ""
+              }
+            ]
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: OAuth application credentials, as "Basic base64(client_id:client_secret)"
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: API key authentication using "ApiKey <key>" format
+  parameters:
+    client_id:
+      in: path
+      name: client_id
+      schema:
+        type: integer
+      required: true
+      description: Numeric ID of the client
+    group_id:
+      in: path
+      name: group_id
+      schema:
+        type: integer
+      required: true
+      description: Numeric ID of the group
+    rec_id:
+      in: path
+      name: rec_id
+      schema:
+        type: integer
+      required: true
+      description: Numeric ID of the record
+    sport_id:
+      in: path
+      name: sport_id
+      schema:
+        type: integer
+      required: true
+      description: Numeric ID of the device
+    scenario_id:
+      in: path
+      name: scenario_id
+      schema:
+        type: integer
+      required: true
+      description: Numeric ID of the scenario
+    id:
+      in: path
+      name: id
+      schema:
+        type: integer
+      required: true
+      description: The id of an element
+    subscription_id:
+      in: path
+      name: subscription_id
+      schema:
+        type: integer
+      required: true
+      description: Numeric ID of the webhook subscription
+  responses:
+    OAuthError:
+      description: OAuth 2.0 error (RFC 6749 section 5.2)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                enum: ["invalid_request", "invalid_client", "invalid_grant", "unsupported_grant_type"]
+                example: "invalid_grant"
+              error_description:
+                type: string
+                example: "Session has been revoked"
+    400:  # $ref: '#/components/responses/400'
+      description: Bad request
+    401:  # $ref: '#/components/responses/401'
+      description: Unauthorized
+    403:  # $ref: '#/components/responses/403'
+      description: Forbidden
+    404:  # $ref: '#/components/responses/404'
+      description: Not Found
+    406:  # $ref: '#/components/responses/406'
+      description: Not Acceptable. Disable for your back type
+    409:  # $ref: '#/components/responses/409'
+      description: Conflict
+    418:  # $ref: '#/components/responses/418'
+      description: Device is not connected
+    429:  # $ref: '#/components/responses/429'
+      description: Too many requests
+    500:  # $ref: '#/components/responses/500'
+      description: Unexpected error
+    503:  # $ref: '#/components/responses/503'
+      description: Service Unavailable. Turning off
+
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
