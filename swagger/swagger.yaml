@@ -1751,6 +1751,9 @@ paths:
                   (e.g. "gps.latitude" -> "gps.PDOP", "mini.gps_latitude" -> "mini.gps_PDOP")
                 - nsat: variable name for nSat (optional). When null, auto-derived from the latitude name
                   (e.g. "gps.latitude" -> "gps.nSat", "mini.gps_latitude" -> "mini.gps_nSat")
+                - heading: variable name for heading (optional). When null, auto-derived from the latitude
+                  name (e.g. "gps.latitude" -> "gps.heading", "mini.gps_latitude" -> "mini.gps_heading").
+                  Only included in the response "values" when its column exists for the record.
             vars: list of additional scalar variables to return at filtered indices
             epsilon: LOD threshold in meters (optional — if provided, overrides auto-scale)
             target_min: minimum number of GPS points to return when auto-scaling (default 100)
@@ -1761,6 +1764,11 @@ paths:
                       are dropped (NaN nSat values are kept). Default null disables the filter.
                       When both pdop_max and nsat_min are set (with both columns available), conditions
                       combine in AND mode.
+            precision_hysteresis_s: optional float — when set (with pdop_max/nsat_min active), erodes
+                      the precision mask by this many seconds on both time edges of each contiguous
+                      good-precision run. Points are only trusted once conditions have been good for
+                      that long, and the same duration preceding a degradation is dropped as already
+                      suspect. Default null keeps the raw mask (retro-compatible).
             x:
                 - type: "range" or "selection"
                 - name: X axis name — "T" (time), "D" (distance) or "T_norm"
@@ -1782,6 +1790,7 @@ paths:
                                 "T": [0.0, 0.5, ...],          // timestamps of kept points (always present)
                                 "D": [0.0, 12.5, ...],         // distances (present if available in record)
                                 "T_norm": [0.0, 0.5, ...],     // normalized time (present if available in record)
+                                "heading": [12.0, 15.5, ...],  // heading in degrees (present if available in record)
                                 "<var>": [12.5, ...]            // extra vars at same indices
                             },
                             "stats": {
@@ -1833,6 +1842,12 @@ paths:
                               description: |
                                 Variable name for nSat (null to auto-derive from the latitude name —
                                 e.g. "gps.latitude" -> "gps.nSat", "mini.gps_latitude" -> "mini.gps_nSat").
+                            heading:
+                              type: [string, "null"]
+                              description: |
+                                Variable name for heading (null to auto-derive from the latitude name —
+                                e.g. "gps.latitude" -> "gps.heading", "mini.gps_latitude" -> "mini.gps_heading").
+                                Only included in the response "values" when its column exists for the record.
                         vars:
                           type: array
                           items:
@@ -1862,6 +1877,15 @@ paths:
                             Optional nSat threshold. When set and the nSat column exists, points with
                             nSat < nsat_min are dropped (NaN nSat values are kept). Default null disables the filter.
                             Combines with pdop_max in AND mode when both are active.
+                          default: null
+                        precision_hysteresis_s:
+                          type: [number, "null"]
+                          description: |
+                            Optional erosion window in seconds. When set (with pdop_max/nsat_min active),
+                            erodes the precision mask by this many seconds on both time edges of each
+                            contiguous good-precision run — points are only trusted once conditions have
+                            been good for that long, and the same duration preceding a degradation is
+                            dropped as already suspect. Default null keeps the raw mask (retro-compatible).
                           default: null
                         x:
                           type: object
@@ -1895,7 +1919,8 @@ paths:
                         "lng": "gps.longitude",
                         "alt": null,
                         "pdop": null,
-                        "nsat": null
+                        "nsat": null,
+                        "heading": null
                       },
                       "vars": ["gps.speed"],
                       "epsilon": null,
@@ -1903,6 +1928,7 @@ paths:
                       "target_max": 10000,
                       "pdop_max": 5,
                       "nsat_min": 6,
+                      "precision_hysteresis_s": 2,
                       "x": {"type": "range", "name": "T", "range": [0.0, 100.0]}
                     }
                   ]
@@ -1930,6 +1956,7 @@ paths:
                             "values": {
                               "T": [0.0, 0.5, 1.2],
                               "D": [0.0, 6.3, 15.1],
+                              "heading": [12.0, 15.5, 18.2],
                               "gps.speed": [12.5, 12.6, 13.1]
                             },
                             "stats": {

@@ -2509,7 +2509,7 @@
           "Records"
         ],
         "summary": "Get GPS data filtered by LOD score for map rendering",
-        "description": "Get GPS coordinates filtered by a pre-computed LOD (Level of Detail) importance score for\nefficient map rendering. Uses per-point Douglas-Peucker importance scores computed at analysis\ntime when available; falls back to on-the-fly computation otherwise.\nEach record entry contains one or more GPS source descriptors (one per GPS source in the record).\nAltitude is included in coordinates when `gps_vars.alt` is provided.\nAdditional scalar variables (e.g. speed) are returned at the same indices as the filtered track.\n```\nRequest params: (for each GPS entry per record)\n    gps_vars:\n        - lat: variable name for latitude (e.g. \"gps.latitude\")\n        - lng: variable name for longitude (e.g. \"gps.longitude\")\n        - alt: variable name for altitude (optional, null to omit)\n        - pdop: variable name for PDOP (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.PDOP\", \"mini.gps_latitude\" -> \"mini.gps_PDOP\")\n        - nsat: variable name for nSat (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.nSat\", \"mini.gps_latitude\" -> \"mini.gps_nSat\")\n    vars: list of additional scalar variables to return at filtered indices\n    epsilon: LOD threshold in meters (optional — if provided, overrides auto-scale)\n    target_min: minimum number of GPS points to return when auto-scaling (default 100)\n    target_max: maximum number of GPS points to return when auto-scaling (default 10000)\n    pdop_max: optional float — when set and the PDOP column exists, points with PDOP > pdop_max\n              are dropped (NaN PDOP values are kept). Default null disables the filter.\n    nsat_min: optional int — when set and the nSat column exists, points with nSat < nsat_min\n              are dropped (NaN nSat values are kept). Default null disables the filter.\n              When both pdop_max and nsat_min are set (with both columns available), conditions\n              combine in AND mode.\n    x:\n        - type: \"range\" or \"selection\"\n        - name: X axis name — \"T\" (time), \"D\" (distance) or \"T_norm\"\n        - range: [start, end] filter (only for type \"range\"; [] = whole record)\n        - num: selection number (only for type \"selection\")\n\nResponse format:\n    \"<rec_id>\": {\n        \"<lat_var>\": {\n            \"type\": \"FeatureCollection\",\n            \"features\": [{\n                \"type\": \"Feature\",\n                \"geometry\": {\n                    \"type\": \"LineString\",\n                    \"coordinates\": [[lng, lat], ...]   // [lng, lat, alt] when alt is provided\n                },\n                \"properties\": {\n                    \"values\": {\n                        \"T\": [0.0, 0.5, ...],          // timestamps of kept points (always present)\n                        \"D\": [0.0, 12.5, ...],         // distances (present if available in record)\n                        \"T_norm\": [0.0, 0.5, ...],     // normalized time (present if available in record)\n                        \"<var>\": [12.5, ...]            // extra vars at same indices\n                    },\n                    \"stats\": {\n                        \"<var>\": {\"min\": 0.0, \"max\": 25.0, \"mean\": 12.0}\n                    }\n                }\n            }]\n        }\n    }\n```\n",
+        "description": "Get GPS coordinates filtered by a pre-computed LOD (Level of Detail) importance score for\nefficient map rendering. Uses per-point Douglas-Peucker importance scores computed at analysis\ntime when available; falls back to on-the-fly computation otherwise.\nEach record entry contains one or more GPS source descriptors (one per GPS source in the record).\nAltitude is included in coordinates when `gps_vars.alt` is provided.\nAdditional scalar variables (e.g. speed) are returned at the same indices as the filtered track.\n```\nRequest params: (for each GPS entry per record)\n    gps_vars:\n        - lat: variable name for latitude (e.g. \"gps.latitude\")\n        - lng: variable name for longitude (e.g. \"gps.longitude\")\n        - alt: variable name for altitude (optional, null to omit)\n        - pdop: variable name for PDOP (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.PDOP\", \"mini.gps_latitude\" -> \"mini.gps_PDOP\")\n        - nsat: variable name for nSat (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.nSat\", \"mini.gps_latitude\" -> \"mini.gps_nSat\")\n        - heading: variable name for heading (optional). When null, auto-derived from the latitude\n          name (e.g. \"gps.latitude\" -> \"gps.heading\", \"mini.gps_latitude\" -> \"mini.gps_heading\").\n          Only included in the response \"values\" when its column exists for the record.\n    vars: list of additional scalar variables to return at filtered indices\n    epsilon: LOD threshold in meters (optional — if provided, overrides auto-scale)\n    target_min: minimum number of GPS points to return when auto-scaling (default 100)\n    target_max: maximum number of GPS points to return when auto-scaling (default 10000)\n    pdop_max: optional float — when set and the PDOP column exists, points with PDOP > pdop_max\n              are dropped (NaN PDOP values are kept). Default null disables the filter.\n    nsat_min: optional int — when set and the nSat column exists, points with nSat < nsat_min\n              are dropped (NaN nSat values are kept). Default null disables the filter.\n              When both pdop_max and nsat_min are set (with both columns available), conditions\n              combine in AND mode.\n    precision_hysteresis_s: optional float — when set (with pdop_max/nsat_min active), erodes\n              the precision mask by this many seconds on both time edges of each contiguous\n              good-precision run. Points are only trusted once conditions have been good for\n              that long, and the same duration preceding a degradation is dropped as already\n              suspect. Default null keeps the raw mask (retro-compatible).\n    x:\n        - type: \"range\" or \"selection\"\n        - name: X axis name — \"T\" (time), \"D\" (distance) or \"T_norm\"\n        - range: [start, end] filter (only for type \"range\"; [] = whole record)\n        - num: selection number (only for type \"selection\")\n\nResponse format:\n    \"<rec_id>\": {\n        \"<lat_var>\": {\n            \"type\": \"FeatureCollection\",\n            \"features\": [{\n                \"type\": \"Feature\",\n                \"geometry\": {\n                    \"type\": \"LineString\",\n                    \"coordinates\": [[lng, lat], ...]   // [lng, lat, alt] when alt is provided\n                },\n                \"properties\": {\n                    \"values\": {\n                        \"T\": [0.0, 0.5, ...],          // timestamps of kept points (always present)\n                        \"D\": [0.0, 12.5, ...],         // distances (present if available in record)\n                        \"T_norm\": [0.0, 0.5, ...],     // normalized time (present if available in record)\n                        \"heading\": [12.0, 15.5, ...],  // heading in degrees (present if available in record)\n                        \"<var>\": [12.5, ...]            // extra vars at same indices\n                    },\n                    \"stats\": {\n                        \"<var>\": {\"min\": 0.0, \"max\": 25.0, \"mean\": 12.0}\n                    }\n                }\n            }]\n        }\n    }\n```\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -2562,6 +2562,13 @@
                                   "null"
                                 ],
                                 "description": "Variable name for nSat (null to auto-derive from the latitude name —\ne.g. \"gps.latitude\" -> \"gps.nSat\", \"mini.gps_latitude\" -> \"mini.gps_nSat\").\n"
+                              },
+                              "heading": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Variable name for heading (null to auto-derive from the latitude name —\ne.g. \"gps.latitude\" -> \"gps.heading\", \"mini.gps_latitude\" -> \"mini.gps_heading\").\nOnly included in the response \"values\" when its column exists for the record.\n"
                               }
                             }
                           },
@@ -2604,6 +2611,14 @@
                               "null"
                             ],
                             "description": "Optional nSat threshold. When set and the nSat column exists, points with\nnSat < nsat_min are dropped (NaN nSat values are kept). Default null disables the filter.\nCombines with pdop_max in AND mode when both are active.\n",
+                            "default": null
+                          },
+                          "precision_hysteresis_s": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "description": "Optional erosion window in seconds. When set (with pdop_max/nsat_min active),\nerodes the precision mask by this many seconds on both time edges of each\ncontiguous good-precision run — points are only trusted once conditions have\nbeen good for that long, and the same duration preceding a degradation is\ndropped as already suspect. Default null keeps the raw mask (retro-compatible).\n",
                             "default": null
                           },
                           "x": {
@@ -2660,7 +2675,8 @@
                           "lng": "gps.longitude",
                           "alt": null,
                           "pdop": null,
-                          "nsat": null
+                          "nsat": null,
+                          "heading": null
                         },
                         "vars": [
                           "gps.speed"
@@ -2670,6 +2686,7 @@
                         "target_max": 10000,
                         "pdop_max": 5,
                         "nsat_min": 6,
+                        "precision_hysteresis_s": 2,
                         "x": {
                           "type": "range",
                           "name": "T",
@@ -2728,6 +2745,11 @@
                                   0.0,
                                   6.3,
                                   15.1
+                                ],
+                                "heading": [
+                                  12.0,
+                                  15.5,
+                                  18.2
                                 ],
                                 "gps.speed": [
                                   12.5,
