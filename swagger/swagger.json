@@ -1202,7 +1202,14 @@
                       "lte"
                     ],
                     "network_infos": {
-                      "has_roaming": false
+                      "links": {
+                        "wifi": {
+                          "state": "online",
+                          "ssid": "Phyling",
+                          "bssid": null,
+                          "rssi": -55
+                        }
+                      }
                     },
                     "battery": 100,
                     "epoch": 1756289565.0,
@@ -1326,7 +1333,14 @@
                     "recTime": 10.010580062866211,
                     "recTimeSinceEpoch": 1759392302.368264,
                     "network_infos": {
-                      "has_roaming": false
+                      "links": {
+                        "wifi": {
+                          "state": "online",
+                          "ssid": "Phyling",
+                          "bssid": null,
+                          "rssi": -55
+                        }
+                      }
                     }
                   }
                 }
