@@ -783,7 +783,7 @@ paths:
                   "mqtt_refresh_delay": 0,
                   "disconnect_timeout": 30,
                   "available_connectivity": ["wifi", "lte"],
-                  "network_infos": { "has_roaming": false },
+                  "network_infos": { "links": { "wifi": { "state": "online", "ssid": "Phyling", "bssid": null, "rssi": -55 } } },
                   "battery": 100,
                   "epoch": 1756289565.0,
                   "state": "idle",
@@ -874,7 +874,7 @@ paths:
                   ],
                   "recTime": 10.010580062866211,
                   "recTimeSinceEpoch": 1759392302.368264,
-                  "network_infos": { "has_roaming": false }
+                  "network_infos": { "links": { "wifi": { "state": "online", "ssid": "Phyling", "bssid": null, "rssi": -55 } } }
                 }
         "401":
           $ref: '#/components/responses/401'
@@ -1590,7 +1590,7 @@ paths:
                 - name: the name of the x axis (for example T or D)
                 - range: [x-start, x-end] (only for range type). [] to select all
                 - num: the num of the selection if you want to select a selection (range is computed automatically)
-                - maxData: the max number of points to return. If there are more points, a lttb is applied
+                - maxData: the max number of points to return. If there are more points, a lttb is applied (capped to 15000)
                 - normalize: (optional, bool) if True, offsets the data so the selection starts at 0. only on selection type
                 - user_offset: (optional, float) additional offset applied to x values (default 0.0)
                 - x_sub_range: (optional, [float, float]) sub-range in normalized (display) coordinates (part of selection)

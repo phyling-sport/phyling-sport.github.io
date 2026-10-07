@@ -1202,7 +1202,14 @@
                       "lte"
                     ],
                     "network_infos": {
-                      "has_roaming": false
+                      "links": {
+                        "wifi": {
+                          "state": "online",
+                          "ssid": "Phyling",
+                          "bssid": null,
+                          "rssi": -55
+                        }
+                      }
                     },
                     "battery": 100,
                     "epoch": 1756289565.0,
@@ -1326,7 +1333,14 @@
                     "recTime": 10.010580062866211,
                     "recTimeSinceEpoch": 1759392302.368264,
                     "network_infos": {
-                      "has_roaming": false
+                      "links": {
+                        "wifi": {
+                          "state": "online",
+                          "ssid": "Phyling",
+                          "bssid": null,
+                          "rssi": -55
+                        }
+                      }
                     }
                   }
                 }
@@ -2316,7 +2330,7 @@
           "Records"
         ],
         "summary": "Get some decoded data for plotting",
-        "description": "Get some decoded data for plotting\nYou can select multiple range of data on multiples records in the same request.\nThe response contains a dict with all records and all data selections for each record in the same order.\n\nThe list of the data that can be selected can be optained with `GET /records/<rec_id>` (available_data field).\n```\ndata range params: (for each data selection)\n    x:\n        - type: range or selection\n        - name: the name of the x axis (for example T or D)\n        - range: [x-start, x-end] (only for range type). [] to select all\n        - num: the num of the selection if you want to select a selection (range is computed automatically)\n        - maxData: the max number of points to return. If there are more points, a lttb is applied\n        - normalize: (optional, bool) if True, offsets the data so the selection starts at 0. only on selection type\n        - user_offset: (optional, float) additional offset applied to x values (default 0.0)\n        - x_sub_range: (optional, [float, float]) sub-range in normalized (display) coordinates (part of selection)\n    y:\n        - list of the data to select. For example: [\"imu.acc_x\", \"imu.acc_y\" ]\n    slot_id: (optional, int) arbitrary slot identifier echoed back in the response\n    label: (optional, str) arbitrary label echoed back in the response\n\nresponse range format: (for each data selection)\n    xrange: Can contains D, T and x ranges\n        - D: [D-start, D-end] (only if distance is available)\n        - T: [T-start, T-end]\n        - x: [x-start, x-end] -> x is the selected range type (T or D)\n    selectionNum: the selection num if the type was selection, else null\n    slot_id: echoed from the request if provided\n    label: echoed from the request if provided\n    data: dict of the selected data with the following format:\n        \"imu.acc_x\": {\n            \"id\": 0,\n            \"label\": \"imu.acc_x\",  # name of the data\n            \"title\": \"imu.acc_x\",  # title (to display on the plot for example)\n            \"data\": [{\"x\": 2.79, \"y\": 0.123}, {\"x\": 2.80, \"y\": 0.125}, ...],\n            \"yRange\": [ymin, ymax],  # if set, the y range to apply on the plot\n            \"color\": \"#ff0000\",  # if set, the color to use for the plot\n            \"type\": \"number\"  # can be number, array32x32, etc.\n        },\n        ...\n```\n",
+        "description": "Get some decoded data for plotting\nYou can select multiple range of data on multiples records in the same request.\nThe response contains a dict with all records and all data selections for each record in the same order.\n\nThe list of the data that can be selected can be optained with `GET /records/<rec_id>` (available_data field).\n```\ndata range params: (for each data selection)\n    x:\n        - type: range or selection\n        - name: the name of the x axis (for example T or D)\n        - range: [x-start, x-end] (only for range type). [] to select all\n        - num: the num of the selection if you want to select a selection (range is computed automatically)\n        - maxData: the max number of points to return. If there are more points, a lttb is applied (capped to 15000)\n        - normalize: (optional, bool) if True, offsets the data so the selection starts at 0. only on selection type\n        - user_offset: (optional, float) additional offset applied to x values (default 0.0)\n        - x_sub_range: (optional, [float, float]) sub-range in normalized (display) coordinates (part of selection)\n    y:\n        - list of the data to select. For example: [\"imu.acc_x\", \"imu.acc_y\" ]\n    slot_id: (optional, int) arbitrary slot identifier echoed back in the response\n    label: (optional, str) arbitrary label echoed back in the response\n\nresponse range format: (for each data selection)\n    xrange: Can contains D, T and x ranges\n        - D: [D-start, D-end] (only if distance is available)\n        - T: [T-start, T-end]\n        - x: [x-start, x-end] -> x is the selected range type (T or D)\n    selectionNum: the selection num if the type was selection, else null\n    slot_id: echoed from the request if provided\n    label: echoed from the request if provided\n    data: dict of the selected data with the following format:\n        \"imu.acc_x\": {\n            \"id\": 0,\n            \"label\": \"imu.acc_x\",  # name of the data\n            \"title\": \"imu.acc_x\",  # title (to display on the plot for example)\n            \"data\": [{\"x\": 2.79, \"y\": 0.123}, {\"x\": 2.80, \"y\": 0.125}, ...],\n            \"yRange\": [ymin, ymax],  # if set, the y range to apply on the plot\n            \"color\": \"#ff0000\",  # if set, the color to use for the plot\n            \"type\": \"number\"  # can be number, array32x32, etc.\n        },\n        ...\n```\n",
         "requestBody": {
           "required": true,
           "content": {
