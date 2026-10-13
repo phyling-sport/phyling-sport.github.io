@@ -4137,7 +4137,8 @@
           },
           "other_data": {
             "type": "string",
-            "example": {}
+            "description": "JSON-encoded extra data. On a video record (`record_type` = `video`), `video` holds the video metadata: `offset_ms` (integer, video start = `dt_created` + offset), `duration_ms`, `width`, `height` (integers >= 0) and `fps` (number >= 0). Each key may be missing on older videos.",
+            "example": "{\"video\": {\"offset_ms\": -800, \"duration_ms\": 31000, \"width\": 1280, \"height\": 720, \"fps\": 30}}"
           },
           "user_ids": {
             "type": "array",
