@@ -1743,6 +1743,8 @@ paths:
         Additional scalar variables (e.g. speed) are returned at the same indices as the filtered track.
         ```
         Request params: (for each GPS entry per record)
+            key: optional string — response key of the entry (default: gps_vars.lat). Lets two entries
+                 on the same GPS source (e.g. two selections of a record) coexist in the response.
             gps_vars:
                 - lat: variable name for latitude (e.g. "gps.latitude")
                 - lng: variable name for longitude (e.g. "gps.longitude")
@@ -1771,13 +1773,14 @@ paths:
                       suspect. Default null keeps the raw mask (retro-compatible).
             x:
                 - type: "range" or "selection"
-                - name: X axis name — "T" (time), "D" (distance) or "T_norm"
+                - name: X axis name — "T" (time), "D" (distance), "T_norm" or another x var such as
+                  "D_<module>" (a selection is then bounded by the [min, max] of that column over [t0, t1])
                 - range: [start, end] filter (only for type "range"; [] = whole record)
                 - num: selection number (only for type "selection")
 
-        Response format:
+        Response format (keyed by entry key, default the latitude variable name):
             "<rec_id>": {
-                "<lat_var>": {
+                "<key>": {
                     "type": "FeatureCollection",
                     "features": [{
                         "type": "Feature",
@@ -1791,15 +1794,33 @@ paths:
                                 "D": [0.0, 12.5, ...],         // distances (present if available in record)
                                 "T_norm": [0.0, 0.5, ...],     // normalized time (present if available in record)
                                 "heading": [12.0, 15.5, ...],  // heading in degrees (present if available in record)
+                                "D_<module>": [0.0, 6.1, ...],  // track distance, only when distance_var is not "D"
                                 "<var>": [12.5, ...]            // extra vars at same indices
                             },
                             "stats": {
                                 "<var>": {"min": 0.0, "max": 25.0, "mean": 12.0}
-                            }
+                            },
+                            "distance_var": "D",               // track distance column ("D" / "D_<module>" / "<device>.D"), null if absent
+                            "distance": 2034.5                 // m covered over the filtered window, null if unavailable
                         }
                     }]
-                }
+                },
+                "<other_key>": {"error": "data_not_ready", "message": "Record data is not available (...)"}
             }
+
+        distance_var is resolved from the latitude variable: first with the analysis rule, "D" for the
+        device's own GPS ("latitude" / "gps.latitude"), "D_<module>" for another module
+        ("mini-420.gps_latitude" -> "D_mini-420"); then, for a session, "<device>." + the same rule on the
+        rest of the name, i.e. "<device>.D" ("Maxi 267.latitude" or "Maxi 267.gps.latitude" ->
+        "Maxi 267.D"). The first candidate whose column exists in the record wins; null when none exists. distance = last - first non-null
+        value of that column over the window, after the coordinate/precision filters and before the LOD
+        decimation. "values.D" keeps returning the record's own "D" column (frontend X axis).
+
+        Errors of a single entry do not fail the response: the entry is replaced by
+        {"error": <code>, "message": <text>}, with code "data_not_ready" (record data not decoded yet),
+        "no_gps_data" (latitude/longitude columns not available for the record, or entry without
+        latitude/longitude variable) or "error" (unexpected processing error, logged server-side). Payload validation and access errors stay global
+        (400 / 403 / 404).
         ```
       requestBody:
         required: true
@@ -1817,6 +1838,9 @@ paths:
                       required:
                         - gps_vars
                       properties:
+                        key:
+                          type: [string, "null"]
+                          description: Response key of the entry (default the latitude variable name)
                         gps_vars:
                           type: object
                           required:
@@ -1883,7 +1907,7 @@ paths:
                           description: |
                             Optional erosion window in seconds. When set (with pdop_max/nsat_min active),
                             erodes the precision mask by this many seconds on both time edges of each
-                            contiguous good-precision run — points are only trusted once conditions have
+                            contiguous good-precision run: points are only trusted once conditions have
                             been good for that long, and the same duration preceding a degradation is
                             dropped as already suspect. Default null keeps the raw mask (retro-compatible).
                           default: null
@@ -1898,9 +1922,10 @@ paths:
                               description: '"range" to filter by explicit bounds, "selection" to use a saved selection'
                             name:
                               type: string
-                              enum: [T, D, T_norm]
                               default: T
-                              description: X axis variable — T (time in seconds), D (distance in meters), T_norm
+                              description: |
+                                X axis variable — T (time in seconds), D (distance in meters), T_norm, or another
+                                x var such as D_<module> (track distance of a module GPS)
                             range:
                               type: array
                               items:
@@ -1936,11 +1961,39 @@ paths:
               }
       responses:
         "200":
-          description: GeoJSON FeatureCollections keyed by record id and latitude variable name
+          description: |
+            GeoJSON FeatureCollections keyed by record id and entry key (default the latitude variable
+            name), or a per-entry error object
           content:
             application/json:
               schema:
                 type: object
+                additionalProperties:
+                  type: object
+                  additionalProperties:
+                    oneOf:
+                      - type: object
+                        description: GeoJSON FeatureCollection (see description)
+                        properties:
+                          type:
+                            type: string
+                            example: FeatureCollection
+                          features:
+                            type: array
+                            items:
+                              type: object
+                      - type: object
+                        description: Per-entry error
+                        required: [error, message]
+                        properties:
+                          error:
+                            type: string
+                            enum: [data_not_ready, no_gps_data, error]
+                            description: |
+                              data_not_ready: record data not decoded yet; no_gps_data: latitude/longitude
+                              columns not available for the record; error: unexpected failure
+                          message:
+                            type: string
                 example: {
                   "818": {
                     "gps.latitude": {
@@ -1956,16 +2009,19 @@ paths:
                             "values": {
                               "T": [0.0, 0.5, 1.2],
                               "D": [0.0, 6.3, 15.1],
-                              "heading": [12.0, 15.5, 18.2],
+                              "heading": [12.0, 13.5, 14.0],
                               "gps.speed": [12.5, 12.6, 13.1]
                             },
                             "stats": {
                               "gps.speed": {"min": 12.5, "max": 13.1, "mean": 12.73}
-                            }
+                            },
+                            "distance_var": "D",
+                            "distance": 15.1
                           }
                         }
                       ]
-                    }
+                    },
+                    "sel_2": {"error": "data_not_ready", "message": "Record data is not available (decode_state=decoding)"}
                   }
                 }
         "400":
