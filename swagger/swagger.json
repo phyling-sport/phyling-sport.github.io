@@ -45,7 +45,7 @@
       "description": "Phyling cloud server"
     },
     {
-      "url": "https://api.staging.cl.phyling.fr",
+      "url": "https://staging.api.app.phyling.fr",
       "description": "Phyling staging server"
     },
     {
