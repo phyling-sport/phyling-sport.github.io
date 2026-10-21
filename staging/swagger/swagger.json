@@ -45,7 +45,7 @@
       "description": "Phyling cloud server"
     },
     {
-      "url": "https://api.staging.cl.phyling.fr",
+      "url": "https://staging.api.app.phyling.fr",
       "description": "Phyling staging server"
     },
     {
@@ -2523,7 +2523,7 @@
           "Records"
         ],
         "summary": "Get GPS data filtered by LOD score for map rendering",
-        "description": "Get GPS coordinates filtered by a pre-computed LOD (Level of Detail) importance score for\nefficient map rendering. Uses per-point Douglas-Peucker importance scores computed at analysis\ntime when available; falls back to on-the-fly computation otherwise.\nEach record entry contains one or more GPS source descriptors (one per GPS source in the record).\nAltitude is included in coordinates when `gps_vars.alt` is provided.\nAdditional scalar variables (e.g. speed) are returned at the same indices as the filtered track.\n```\nRequest params: (for each GPS entry per record)\n    gps_vars:\n        - lat: variable name for latitude (e.g. \"gps.latitude\")\n        - lng: variable name for longitude (e.g. \"gps.longitude\")\n        - alt: variable name for altitude (optional, null to omit)\n        - pdop: variable name for PDOP (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.PDOP\", \"mini.gps_latitude\" -> \"mini.gps_PDOP\")\n        - nsat: variable name for nSat (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.nSat\", \"mini.gps_latitude\" -> \"mini.gps_nSat\")\n        - heading: variable name for heading (optional). When null, auto-derived from the latitude\n          name (e.g. \"gps.latitude\" -> \"gps.heading\", \"mini.gps_latitude\" -> \"mini.gps_heading\").\n          Only included in the response \"values\" when its column exists for the record.\n    vars: list of additional scalar variables to return at filtered indices\n    epsilon: LOD threshold in meters (optional — if provided, overrides auto-scale)\n    target_min: minimum number of GPS points to return when auto-scaling (default 100)\n    target_max: maximum number of GPS points to return when auto-scaling (default 10000)\n    pdop_max: optional float — when set and the PDOP column exists, points with PDOP > pdop_max\n              are dropped (NaN PDOP values are kept). Default null disables the filter.\n    nsat_min: optional int — when set and the nSat column exists, points with nSat < nsat_min\n              are dropped (NaN nSat values are kept). Default null disables the filter.\n              When both pdop_max and nsat_min are set (with both columns available), conditions\n              combine in AND mode.\n    precision_hysteresis_s: optional float — when set (with pdop_max/nsat_min active), erodes\n              the precision mask by this many seconds on both time edges of each contiguous\n              good-precision run. Points are only trusted once conditions have been good for\n              that long, and the same duration preceding a degradation is dropped as already\n              suspect. Default null keeps the raw mask (retro-compatible).\n    x:\n        - type: \"range\" or \"selection\"\n        - name: X axis name — \"T\" (time), \"D\" (distance) or \"T_norm\"\n        - range: [start, end] filter (only for type \"range\"; [] = whole record)\n        - num: selection number (only for type \"selection\")\n\nResponse format:\n    \"<rec_id>\": {\n        \"<lat_var>\": {\n            \"type\": \"FeatureCollection\",\n            \"features\": [{\n                \"type\": \"Feature\",\n                \"geometry\": {\n                    \"type\": \"LineString\",\n                    \"coordinates\": [[lng, lat], ...]   // [lng, lat, alt] when alt is provided\n                },\n                \"properties\": {\n                    \"values\": {\n                        \"T\": [0.0, 0.5, ...],          // timestamps of kept points (always present)\n                        \"D\": [0.0, 12.5, ...],         // distances (present if available in record)\n                        \"T_norm\": [0.0, 0.5, ...],     // normalized time (present if available in record)\n                        \"heading\": [12.0, 15.5, ...],  // heading in degrees (present if available in record)\n                        \"<var>\": [12.5, ...]            // extra vars at same indices\n                    },\n                    \"stats\": {\n                        \"<var>\": {\"min\": 0.0, \"max\": 25.0, \"mean\": 12.0}\n                    }\n                }\n            }]\n        }\n    }\n```\n",
+        "description": "Get GPS coordinates filtered by a pre-computed LOD (Level of Detail) importance score for\nefficient map rendering. Uses per-point Douglas-Peucker importance scores computed at analysis\ntime when available; falls back to on-the-fly computation otherwise.\nEach record entry contains one or more GPS source descriptors (one per GPS source in the record).\nAltitude is included in coordinates when `gps_vars.alt` is provided.\nAdditional scalar variables (e.g. speed) are returned at the same indices as the filtered track.\n```\nRequest params: (for each GPS entry per record)\n    key: optional string — response key of the entry (default: gps_vars.lat). Lets two entries\n         on the same GPS source (e.g. two selections of a record) coexist in the response.\n    gps_vars:\n        - lat: variable name for latitude (e.g. \"gps.latitude\")\n        - lng: variable name for longitude (e.g. \"gps.longitude\")\n        - alt: variable name for altitude (optional, null to omit)\n        - pdop: variable name for PDOP (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.PDOP\", \"mini.gps_latitude\" -> \"mini.gps_PDOP\")\n        - nsat: variable name for nSat (optional). When null, auto-derived from the latitude name\n          (e.g. \"gps.latitude\" -> \"gps.nSat\", \"mini.gps_latitude\" -> \"mini.gps_nSat\")\n        - heading: variable name for heading (optional). When null, auto-derived from the latitude\n          name (e.g. \"gps.latitude\" -> \"gps.heading\", \"mini.gps_latitude\" -> \"mini.gps_heading\").\n          Only included in the response \"values\" when its column exists for the record.\n    vars: list of additional scalar variables to return at filtered indices\n    epsilon: LOD threshold in meters (optional — if provided, overrides auto-scale)\n    target_min: minimum number of GPS points to return when auto-scaling (default 100)\n    target_max: maximum number of GPS points to return when auto-scaling (default 10000)\n    pdop_max: optional float — when set and the PDOP column exists, points with PDOP > pdop_max\n              are dropped (NaN PDOP values are kept). Default null disables the filter.\n    nsat_min: optional int — when set and the nSat column exists, points with nSat < nsat_min\n              are dropped (NaN nSat values are kept). Default null disables the filter.\n              When both pdop_max and nsat_min are set (with both columns available), conditions\n              combine in AND mode.\n    precision_hysteresis_s: optional float — when set (with pdop_max/nsat_min active), erodes\n              the precision mask by this many seconds on both time edges of each contiguous\n              good-precision run. Points are only trusted once conditions have been good for\n              that long, and the same duration preceding a degradation is dropped as already\n              suspect. Default null keeps the raw mask (retro-compatible).\n    x:\n        - type: \"range\" or \"selection\"\n        - name: X axis name — \"T\" (time), \"D\" (distance), \"T_norm\" or another x var such as\n          \"D_<module>\" (a selection is then bounded by the [min, max] of that column over [t0, t1])\n        - range: [start, end] filter (only for type \"range\"; [] = whole record)\n        - num: selection number (only for type \"selection\")\n\nResponse format (keyed by entry key, default the latitude variable name):\n    \"<rec_id>\": {\n        \"<key>\": {\n            \"type\": \"FeatureCollection\",\n            \"features\": [{\n                \"type\": \"Feature\",\n                \"geometry\": {\n                    \"type\": \"LineString\",\n                    \"coordinates\": [[lng, lat], ...]   // [lng, lat, alt] when alt is provided\n                },\n                \"properties\": {\n                    \"values\": {\n                        \"T\": [0.0, 0.5, ...],          // timestamps of kept points (always present)\n                        \"D\": [0.0, 12.5, ...],         // distances (present if available in record)\n                        \"T_norm\": [0.0, 0.5, ...],     // normalized time (present if available in record)\n                        \"heading\": [12.0, 15.5, ...],  // heading in degrees (present if available in record)\n                        \"D_<module>\": [0.0, 6.1, ...],  // track distance, only when distance_var is not \"D\"\n                        \"<var>\": [12.5, ...]            // extra vars at same indices\n                    },\n                    \"stats\": {\n                        \"<var>\": {\"min\": 0.0, \"max\": 25.0, \"mean\": 12.0}\n                    },\n                    \"distance_var\": \"D\",               // track distance column (\"D\" / \"D_<module>\" / \"<device>.D\"), null if absent\n                    \"distance\": 2034.5                 // m covered over the filtered window, null if unavailable\n                }\n            }]\n        },\n        \"<other_key>\": {\"error\": \"data_not_ready\", \"message\": \"Record data is not available (...)\"}\n    }\n\ndistance_var is resolved from the latitude variable: first with the analysis rule, \"D\" for the\ndevice's own GPS (\"latitude\" / \"gps.latitude\"), \"D_<module>\" for another module\n(\"mini-420.gps_latitude\" -> \"D_mini-420\"); then, for a session, \"<device>.\" + the same rule on the\nrest of the name, i.e. \"<device>.D\" (\"Maxi 267.latitude\" or \"Maxi 267.gps.latitude\" ->\n\"Maxi 267.D\"). The first candidate whose column exists in the record wins; null when none exists. distance = last - first non-null\nvalue of that column over the window, after the coordinate/precision filters and before the LOD\ndecimation. \"values.D\" keeps returning the record's own \"D\" column (frontend X axis).\n\nErrors of a single entry do not fail the response: the entry is replaced by\n{\"error\": <code>, \"message\": <text>}, with code \"data_not_ready\" (record data not decoded yet),\n\"no_gps_data\" (latitude/longitude columns not available for the record, or entry without\nlatitude/longitude variable) or \"error\" (unexpected processing error, logged server-side). Payload validation and access errors stay global\n(400 / 403 / 404).\n```\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -2541,6 +2541,13 @@
                           "gps_vars"
                         ],
                         "properties": {
+                          "key": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Response key of the entry (default the latitude variable name)"
+                          },
                           "gps_vars": {
                             "type": "object",
                             "required": [
@@ -2632,7 +2639,7 @@
                               "number",
                               "null"
                             ],
-                            "description": "Optional erosion window in seconds. When set (with pdop_max/nsat_min active),\nerodes the precision mask by this many seconds on both time edges of each\ncontiguous good-precision run — points are only trusted once conditions have\nbeen good for that long, and the same duration preceding a degradation is\ndropped as already suspect. Default null keeps the raw mask (retro-compatible).\n",
+                            "description": "Optional erosion window in seconds. When set (with pdop_max/nsat_min active),\nerodes the precision mask by this many seconds on both time edges of each\ncontiguous good-precision run: points are only trusted once conditions have\nbeen good for that long, and the same duration preceding a degradation is\ndropped as already suspect. Default null keeps the raw mask (retro-compatible).\n",
                             "default": null
                           },
                           "x": {
@@ -2650,13 +2657,8 @@
                               },
                               "name": {
                                 "type": "string",
-                                "enum": [
-                                  "T",
-                                  "D",
-                                  "T_norm"
-                                ],
                                 "default": "T",
-                                "description": "X axis variable — T (time in seconds), D (distance in meters), T_norm"
+                                "description": "X axis variable — T (time in seconds), D (distance in meters), T_norm, or another\nx var such as D_<module> (track distance of a module GPS)\n"
                               },
                               "range": {
                                 "type": "array",
@@ -2719,11 +2721,56 @@
         },
         "responses": {
           "200": {
-            "description": "GeoJSON FeatureCollections keyed by record id and latitude variable name",
+            "description": "GeoJSON FeatureCollections keyed by record id and entry key (default the latitude variable\nname), or a per-entry error object\n",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "description": "GeoJSON FeatureCollection (see description)",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "example": "FeatureCollection"
+                            },
+                            "features": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "description": "Per-entry error",
+                          "required": [
+                            "error",
+                            "message"
+                          ],
+                          "properties": {
+                            "error": {
+                              "type": "string",
+                              "enum": [
+                                "data_not_ready",
+                                "no_gps_data",
+                                "error"
+                              ],
+                              "description": "data_not_ready: record data not decoded yet; no_gps_data: latitude/longitude\ncolumns not available for the record; error: unexpected failure\n"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
                   "example": {
                     "818": {
                       "gps.latitude": {
@@ -2762,8 +2809,8 @@
                                 ],
                                 "heading": [
                                   12.0,
-                                  15.5,
-                                  18.2
+                                  13.5,
+                                  14.0
                                 ],
                                 "gps.speed": [
                                   12.5,
@@ -2777,10 +2824,16 @@
                                   "max": 13.1,
                                   "mean": 12.73
                                 }
-                              }
+                              },
+                              "distance_var": "D",
+                              "distance": 15.1
                             }
                           }
                         ]
+                      },
+                      "sel_2": {
+                        "error": "data_not_ready",
+                        "message": "Record data is not available (decode_state=decoding)"
                       }
                     }
                   }
@@ -4137,7 +4190,8 @@
           },
           "other_data": {
             "type": "string",
-            "example": {}
+            "description": "JSON-encoded extra data. On a video record (`record_type` = `video`), `video` holds the video metadata: `offset_ms` (integer, video start = `dt_created` + offset), `duration_ms`, `width`, `height` (integers >= 0) and `fps` (number >= 0). Each key may be missing on older videos.",
+            "example": "{\"video\": {\"offset_ms\": -800, \"duration_ms\": 31000, \"width\": 1280, \"height\": 720, \"fps\": 30}}"
           },
           "user_ids": {
             "type": "array",
