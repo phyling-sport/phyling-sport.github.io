@@ -1729,6 +1729,176 @@ paths:
         "500":
           $ref: '#/components/responses/500'
 
+  /records/fft:
+    post:
+      tags:
+      - Records
+      summary: Amplitude spectrum (FFT) of one variable over selections or time ranges
+      description: |
+        Compute the amplitude spectrum of one numeric variable of a record over one or more time windows (selections
+        or time ranges). One spectrum is returned per window, in the request order.
+
+        - Exact (`approximate: false`, `approximate_reason: null`): the variable is measured by a sensor of the
+          record. The spectrum uses the sensor's own samples: `module` names the sensor, `fs` is its measured sampling
+          rate and frequencies go up to `fs / 2`.
+        - Approximate (`approximate: true`, `module: null`): any other variable (computed by the analysis, sessions,
+          imported files, records not decoded again since this feature). The spectrum uses the common time base of the
+          record, at the median sampling rate of the window. `approximate_reason` is `legacy_decode` when the record
+          was decoded before this feature (decoding it again may give an exact spectrum), `computed` otherwise
+          (decoding it again changes nothing).
+
+        Method: Welch, Hann window, mean removed, segments of `segment_duration` seconds with 50 % overlap. Gaps in the
+        data split the signal; a window shorter than one segment gives a single segment. `amplitude` is in the unit of
+        the variable: a sine of amplitude A reads A.
+
+        `peaks` lists the dominant frequencies, highest amplitude first, at most `max_peaks`. A peak is kept when its
+        prominence is at least `peak_threshold` times the local level of the spectrum (`prominence` is this ratio). Its
+        frequency and amplitude are refined between frequency bins, except on the lowest bin. `low_resolution` is true
+        below `2 / segment_duration` (less than 2 periods per segment): use longer segments.
+
+        A window without data returns empty `freq`, `amplitude` and `peaks`, with `n_samples: 0`.
+
+        Errors:
+        - 400: invalid body (`rec_id`, `y` not a numeric variable of the record, `segment_duration`, `peak_threshold`,
+          `max_peaks` or `windows` not allowed), or a selection without start or end time;
+        - 404: unknown record or selection;
+        - 409: record data not ready yet (decoding in progress).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rec_id, y, windows]
+              properties:
+                rec_id:
+                  type: integer
+                  description: Record id
+                y:
+                  type: string
+                  description: Key of a numeric variable (see `available_data` of `GET /records/<rec_id>`)
+                segment_duration:
+                  type: number
+                  enum: [2, 5, 10, 20]
+                  default: 10
+                  description: Duration of the Welch segments in seconds
+                peak_threshold:
+                  type: number
+                  enum: [2, 3, 5, 10]
+                  default: 5
+                  description: Minimum peak prominence, as a multiple of the local floor of the spectrum (running median)
+                max_peaks:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  default: 5
+                  description: Maximum number of dominant frequencies returned per window
+                windows:
+                  type: array
+                  minItems: 1
+                  description: Time windows, in seconds from the start of the record. `range` [] selects the whole record.
+                  items:
+                    type: object
+                    required: [type]
+                    properties:
+                      type:
+                        type: string
+                        enum: [selection, range]
+                      num:
+                        type: integer
+                        description: Selection num (type selection)
+                      range:
+                        type: array
+                        items:
+                          type: number
+                        description: "[t0, t1] in seconds (type range)"
+              example: {
+                "rec_id": 818,
+                "y": "imu.acc_x",
+                "segment_duration": 10,
+                "peak_threshold": 5,
+                "max_peaks": 5,
+                "windows": [
+                  { "type": "selection", "num": 1 },
+                  { "type": "range", "range": [ 10, 30 ] }
+                ]
+              }
+      responses:
+        "200":
+          description: One spectrum per window
+          content:
+            application/json:
+              schema:
+                type: object
+                example: {
+                  "variable": "imu.acc_x",
+                  "unit": "m/s²",
+                  "description": "Acceleration X",
+                  "data": [
+                    {
+                      "type": "selection",
+                      "num": 1,
+                      "range": [ 12.3, 45.6 ],
+                      "approximate": false,
+                      "approximate_reason": null,
+                      "module": "imu",
+                      "fs": 200.0,
+                      "nyquist": 100.0,
+                      "segment_duration": 10.0,
+                      "n_samples": 6661,
+                      "n_segments": 5,
+                      "freq": [ 0.0, 0.1, 0.2, ..., 100.0 ],
+                      "amplitude": [ 0.0012, 0.0151, 0.0203, ..., 0.0004 ],
+                      "peaks": [
+                        { "freq": 1.23, "amplitude": 0.85, "prominence": 42.1, "low_resolution": false },
+                        { "freq": 2.46, "amplitude": 0.21, "prominence": 9.8, "low_resolution": false }
+                      ]
+                    },
+                    {
+                      "type": "range",
+                      "num": null,
+                      "range": [ 10, 30 ],
+                      "approximate": false,
+                      "approximate_reason": null,
+                      "module": "imu",
+                      "fs": 200.0,
+                      "nyquist": 100.0,
+                      "segment_duration": 10.0,
+                      "n_samples": 4001,
+                      "n_segments": 3,
+                      "freq": [ 0.0, 0.1, 0.2, ..., 100.0 ],
+                      "amplitude": [ 0.0009, 0.0143, 0.0198, ..., 0.0003 ],
+                      "peaks": [ { "freq": 1.22, "amplitude": 0.83, "prominence": 38.5, "low_resolution": false } ]
+                    }
+                  ]
+                }
+        "400":
+          $ref: '#/components/responses/400'
+        "401":
+          $ref: '#/components/responses/401'
+        "403":
+          $ref: '#/components/responses/403'
+        "404":
+          $ref: '#/components/responses/404'
+        "409":
+          description: Record data not ready yet (decoding in progress)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: data_not_ready
+                  record_id:
+                    type: integer
+                  decode_state:
+                    type: string
+                  message:
+                    type: string
+        "500":
+          $ref: '#/components/responses/500'
+
   /records/gps_data:
     post:
       tags:
