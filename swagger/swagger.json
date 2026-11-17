@@ -193,6 +193,27 @@
             },
             "required": false,
             "description": "Optional state parameter for security"
+          },
+          {
+            "in": "query",
+            "name": "code_challenge",
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "PKCE (RFC 7636) challenge, BASE64URL(SHA256(code_verifier)) without padding (43 characters). Mandatory for a public client (no secret), optional for a confidential one: once sent, the matching code_verifier is required at /oauth/token.\n"
+          },
+          {
+            "in": "query",
+            "name": "code_challenge_method",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "S256"
+              ]
+            },
+            "required": false,
+            "description": "Must be S256 when code_challenge is sent; plain (or a missing method) is refused."
           }
         ],
         "responses": {
@@ -206,8 +227,11 @@
               }
             }
           },
+          "302": {
+            "description": "Invalid PKCE parameters (missing challenge for a public client, plain or missing method, malformed challenge): RFC 6749 error redirect to the validated redirect_uri, with `error=invalid_request`, `error_description` and `state` when given.\n"
+          },
           "400": {
-            "description": "App disabled or redirect URI not allowed"
+            "description": "App disabled or redirect URI not allowed (never redirected)"
           }
         }
       }
@@ -237,6 +261,17 @@
                   "state": {
                     "type": "string",
                     "example": "random_state_string"
+                  },
+                  "code_challenge": {
+                    "type": "string",
+                    "example": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+                    "description": "PKCE challenge, same rules as on /oauth/authorize"
+                  },
+                  "code_challenge_method": {
+                    "type": "string",
+                    "enum": [
+                      "S256"
+                    ]
                   }
                 },
                 "required": [
@@ -281,7 +316,7 @@
             }
           },
           "400": {
-            "description": "App disabled or redirect URI not allowed"
+            "description": "App disabled or redirect URI not allowed (JSON string), or invalid PKCE parameters: {\"error\": \"invalid_request\", \"error_description\": ..., \"redirect_next\": ...} where redirect_next is the RFC 6749 error redirect to the validated redirect_uri (state included).\n"
           },
           "401": {
             "$ref": "#/components/responses/401"
@@ -295,7 +330,7 @@
           "OAuth"
         ],
         "summary": "Exchange authorization code or refresh token for access/refresh JWTs",
-        "description": "Exchange an authorization code or refresh token for access/refresh JWTs. The body may be sent as JSON or as application/x-www-form-urlencoded, and the client credentials may be sent either in the body (client_secret_post) or in an `Authorization: Basic base64(client_id:client_secret)` header (client_secret_basic). When both channels carry a client_id, they must match. `redirect_uri` is mandatory for the authorization_code grant and ignored for the refresh_token grant. Each successful exchange rotates the refresh token: the previous one must be dropped.\n",
+        "description": "Exchange an authorization code or refresh token for access/refresh JWTs. The body may be sent as JSON or as application/x-www-form-urlencoded, and the client credentials may be sent either in the body (client_secret_post) or in an `Authorization: Basic base64(client_id:client_secret)` header (client_secret_basic). When both channels carry a client_id, they must match. `redirect_uri` is mandatory for the authorization_code grant and ignored for the refresh_token grant. Each successful exchange rotates the refresh token: the previous one must be dropped. PKCE (RFC 7636, S256 only): when the authorization code was issued with a code_challenge, the matching `code_verifier` is mandatory; a code_verifier sent for a code issued without challenge is refused. A failed verification consumes the code. A public client (no secret) authenticates by its client_id alone, on both grants, and must use PKCE.\n",
         "security": [
           {
             "basicAuth": []
@@ -1038,6 +1073,83 @@
           },
           "403": {
             "$ref": "#/components/responses/403"
+          }
+        }
+      }
+    },
+    "/devices/uid/{uid}": {
+      "get": {
+        "tags": [
+          "Devices"
+        ],
+        "summary": "Get the current serial number of a software device (Phyling mobile app) from its public uid",
+        "description": "The serial number of a phone (its bridge) changes when another account signs in on the phone, or after\n60 days without a connection. Its public uid (copied from the app settings) does not. This route returns the\ncurrent serial number, connected or not, to subscribe to its realtime data (Socket.IO rooms\napp/device/<number>/...). Rights are the realtime rights: any member of the client of the bridge.\n\nCall this route again when your code starts and when the phone comes back online.\n",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uid",
+            "schema": {
+              "type": "string",
+              "example": "51AB-CDEF-GHJK-MNPQ"
+            },
+            "required": true,
+            "description": "Public uid, hyphens optional, case insensitive"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current bridge of the uid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "uid": {
+                      "type": "string",
+                      "example": "51AB-CDEF-GHJK-MNPQ"
+                    },
+                    "number": {
+                      "type": "integer",
+                      "example": 51100001
+                    },
+                    "client_id": {
+                      "type": "integer",
+                      "example": 2
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "410": {
+            "description": "No live bridge for this uid, the Phyling app must be opened on the phone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fr": {
+                      "type": "string"
+                    },
+                    "en": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1915,6 +2027,14 @@
                     "type": "array",
                     "example": []
                   },
+                  "deviceRecIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "example": [],
+                    "description": "deviceRecIds of the records on their device (the record's device_rec_id), empty to select all. Combine with deviceIds to target one device."
+                  },
                   "clientIds": {
                     "type": "array",
                     "example": []
@@ -2085,6 +2205,14 @@
               "type": "string"
             },
             "description": "Comma-separated device ids, empty to select all"
+          },
+          {
+            "in": "query",
+            "name": "deviceRecIds",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated deviceRecIds of the records on their device (the record's device_rec_id), empty to select all. Combine with deviceIds to target one device."
           },
           {
             "in": "query",
@@ -2297,10 +2425,33 @@
             "description": "The selection id (for decoded and pdf download only)"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "legacy_extension": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "For `raw` only (ignored otherwise). If true, the raw file is served with the legacy name `<basename>.txt` and `application/octet-stream`, same content."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "File downloaded",
+            "description": "File downloaded. The raw file (`raw`) is named `<basename>.phy`, legacy records stored as `.txt` included, and served as `application/vnd.phyling.record` (unless `legacy_extension` is true).",
             "content": {
+              "application/vnd.phyling.record": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
               "application/octet-stream": {
                 "schema": {
                   "type": "string",
@@ -3743,6 +3894,11 @@
             "type": "string",
             "example": "https://example.com/callback",
             "description": "Required for the authorization_code grant, ignored otherwise"
+          },
+          "code_verifier": {
+            "type": "string",
+            "example": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+            "description": "PKCE verifier (43 to 128 characters among A-Z a-z 0-9 - . _ ~), required for the authorization_code grant when the code was issued with a code_challenge\n"
           }
         },
         "required": [
@@ -4325,6 +4481,14 @@
           "internal_maxi_id": {
             "type": "integer",
             "example": 1
+          },
+          "device_rec_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "example": 12,
+            "description": "The record's id on its device (deviceRecId). Read from the realtime data for a realtime record (open or finalized), from internal_maxi_id otherwise; null when unknown (internal_maxi_id not set)."
           },
           "client_id": {
             "type": "integer",
